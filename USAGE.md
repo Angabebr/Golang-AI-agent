@@ -8,13 +8,27 @@ go mod download
 ```
 
 2. **Создайте файл `.env` в корне проекта:**
+```bash
+# Скопируйте шаблон
+cp .env.example .env
+
+# Отредактируйте .env и добавьте ваш реальный API ключ
+# НИКОГДА не коммитьте .env файл!
+```
+
+Пример содержимого `.env`:
 ```env
-OPENAI_API_KEY=sk-your-api-key-here
+OPENAI_API_KEY=sk-your-real-api-key-here
 OPENAI_MODEL=gpt-4-turbo-preview
 BROWSER_USER_DATA_DIR=./browser_data
 ENABLE_SECURITY_LAYER=true
 START_URL=https://www.google.com
 ```
+
+**⚠️ БЕЗОПАСНОСТЬ:**
+- Файл `.env` автоматически игнорируется git
+- `browser_data/` содержит cookies и сессии - тоже игнорируется
+- Используйте `.env.example` как шаблон, но не храните реальные ключи в репозитории
 
 3. **Запустите агента:**
 ```bash
