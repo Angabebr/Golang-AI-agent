@@ -23,13 +23,27 @@ import (
 func main() {
 	// Загружаем переменные окружения
 	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found: %v", err)
+		log.Printf("Warning: .env file not found or error loading: %v", err)
+		log.Println("Попытка продолжить с переменными окружения системы...")
 	}
 
 	// Получаем конфигурацию
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY не установлен. Создайте файл .env с вашим API ключом.")
+		log.Fatal(`
+❌ OPENAI_API_KEY не установлен!
+
+Создайте файл .env в корне проекта со следующим содержимым:
+OPENAI_API_KEY=your_api_key_here
+OPENAI_MODEL=gpt-4-turbo-preview
+BROWSER_USER_DATA_DIR=./browser_data
+ENABLE_SECURITY_LAYER=true
+START_URL=https://www.google.com
+
+Или установите переменную окружения:
+set OPENAI_API_KEY=your_api_key_here (Windows)
+export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
+`)
 	}
 
 	model := os.Getenv("OPENAI_MODEL")
@@ -49,9 +63,10 @@ func main() {
 	fmt.Println("🚀 Инициализация AI-агента...")
 
 	// Создаем браузер (не headless, чтобы видеть процесс)
+	fmt.Println("🌐 Запуск браузера...")
 	browserInstance, err := browser.NewBrowser(userDataDir, false)
 	if err != nil {
-		log.Fatalf("Не удалось запустить браузер: %v", err)
+		log.Fatalf("\n❌ Не удалось запустить браузер: %v\n\nУбедитесь, что Chrome/Chromium установлен и доступен.", err)
 	}
 	defer browserInstance.Close()
 

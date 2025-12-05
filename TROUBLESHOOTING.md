@@ -1,0 +1,128 @@
+# Устранение проблем
+
+## Проблема: "OPENAI_API_KEY не установлен"
+
+### Решение:
+1. Убедитесь, что файл `.env` существует в корне проекта
+2. Проверьте, что файл сохранен в кодировке **UTF-8 без BOM**
+3. Убедитесь, что в файле есть строка:
+   ```
+   OPENAI_API_KEY=your_api_key_here
+   ```
+
+### Как исправить BOM в .env:
+**Windows (PowerShell):**
+```powershell
+$content = Get-Content .env -Raw
+$content = $content.TrimStart([char]0xFEFF)
+[System.IO.File]::WriteAllText("$PWD\.env", $content, [System.Text.UTF8Encoding]::new($false))
+```
+
+**Или пересоздайте файл:**
+1. Удалите старый `.env`
+2. Скопируйте `.env.example` в `.env`
+3. Добавьте ваш API ключ
+
+## Проблема: "failed to start browser" / "chrome failed to start"
+
+### Решение:
+1. **Установите Chrome или Chromium:**
+   - Chrome: https://www.google.com/chrome/
+   - Chromium: https://www.chromium.org/getting-involved/download-chromium
+
+2. **Проверьте, что Chrome установлен:**
+   ```powershell
+   # Windows
+   where.exe chrome
+   
+   # Или проверьте пути:
+   Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe"
+   Test-Path "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+   ```
+
+3. **Если Chrome установлен, но не найден:**
+   - Добавьте Chrome в PATH
+   - Или укажите путь явно в коде (требует изменения)
+
+4. **Проверьте антивирус:**
+   - Некоторые антивирусы блокируют автоматический запуск Chrome
+   - Добавьте исключение для вашего .exe файла
+
+## Проблема: ".env file not found: unexpected character"
+
+Это означает, что в `.env` файле есть BOM (Byte Order Mark) или неправильная кодировка.
+
+### Решение:
+Пересоздайте `.env` файл в кодировке UTF-8 без BOM:
+1. Откройте `.env` в Notepad++
+2. Кодировка → Преобразовать в UTF-8 без BOM
+3. Сохраните
+
+Или используйте команду выше для удаления BOM.
+
+## Проверка работоспособности
+
+### Шаг 1: Проверка .env
+```bash
+# Проверьте содержимое
+cat .env  # Linux/Mac
+type .env  # Windows
+
+# Должно быть:
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4-turbo-preview
+```
+
+### Шаг 2: Проверка Chrome
+```bash
+# Windows
+where.exe chrome
+
+# Linux
+which google-chrome
+which chromium
+
+# Mac
+which "Google Chrome"
+```
+
+### Шаг 3: Запуск
+```bash
+# Из исходников
+go run main.go
+
+# Или из .exe
+.\Golang-AI-agent.exe  # Windows
+./golang-ai-agent  # Linux/Mac
+```
+
+## Дополнительная диагностика
+
+Если проблемы продолжаются:
+
+1. **Проверьте логи:**
+   - Запустите с выводом ошибок: `.\Golang-AI-agent.exe 2>&1 | tee error.log`
+
+2. **Проверьте переменные окружения:**
+   ```powershell
+   # Windows
+   $env:OPENAI_API_KEY
+   
+   # Linux/Mac
+   echo $OPENAI_API_KEY
+   ```
+
+3. **Пересоберите проект:**
+   ```bash
+   go clean
+   go build -o golang-ai-agent.exe .
+   ```
+
+## Контакты
+
+Если проблема не решена, создайте issue на GitHub с:
+- Версией ОС
+- Версией Go (`go version`)
+- Полным текстом ошибки
+- Содержимым `.env.example` (БЕЗ реального API ключа!)
+

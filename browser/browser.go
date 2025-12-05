@@ -41,11 +41,11 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	}
 
 	// Устанавливаем таймаут для инициализации
-	ctx, timeout := context.WithTimeout(ctx, 30*time.Second)
+	initCtx, timeout := context.WithTimeout(ctx, 30*time.Second)
 	defer timeout()
 
-	if err := chromedp.Run(ctx); err != nil {
-		return nil, fmt.Errorf("failed to start browser: %w", err)
+	if err := chromedp.Run(initCtx); err != nil {
+		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 
 	return b, nil
