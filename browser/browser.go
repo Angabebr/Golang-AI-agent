@@ -11,11 +11,11 @@ import (
 
 // Browser управляет браузером через chromedp
 type Browser struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	allocCtx    context.Context
-	allocCancel context.CancelFunc
-	keepAlive   context.Context
+	ctx             context.Context
+	cancel          context.CancelFunc
+	allocCtx        context.Context
+	allocCancel     context.CancelFunc
+	keepAlive       context.Context
 	keepAliveCancel context.CancelFunc
 }
 
@@ -29,17 +29,17 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.UserDataDir(userDataDir),
 		chromedp.WindowSize(1920, 1080),
 		// Флаги для пропуска окна выбора профиля
-		chromedp.Flag("no-first-run", true),                    // Пропустить первый запуск
-		chromedp.Flag("no-default-browser-check", true),        // Не проверять браузер по умолчанию
-		chromedp.Flag("disable-default-apps", true),            // Отключить приложения по умолчанию
-		chromedp.Flag("disable-infobars", true),                // Отключить информационные панели
-		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
-		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
-		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
+		chromedp.Flag("no-first-run", true),             // Пропустить первый запуск
+		chromedp.Flag("no-default-browser-check", true), // Не проверять браузер по умолчанию
+		chromedp.Flag("disable-default-apps", true),     // Отключить приложения по умолчанию
+		chromedp.Flag("disable-infobars", true),         // Отключить информационные панели
+		chromedp.Flag("disable-popup-blocking", true),   // Отключить блокировку всплывающих окон
+		chromedp.Flag("profile-directory", "Default"),   // Использовать профиль Default
+		chromedp.Flag("disable-extensions", false),      // Можно оставить расширения, если нужно
 		// Флаги для предотвращения автоматического закрытия
-		chromedp.Flag("disable-background-networking", true),   // Отключить фоновые сетевые запросы
+		chromedp.Flag("disable-background-networking", true),       // Отключить фоновые сетевые запросы
 		chromedp.Flag("disable-background-timer-throttling", true), // Отключить throttling таймеров
-		chromedp.Flag("disable-renderer-backgrounding", true),  // Отключить фоновый рендеринг
+		chromedp.Flag("disable-renderer-backgrounding", true),      // Отключить фоновый рендеринг
 	)
 
 	// Создаем контекст, который не будет отменен автоматически
@@ -50,8 +50,8 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
 		// Фильтруем несущественные сообщения
 		msg := fmt.Sprintf(format, v...)
-		if !contains(msg, "could not unmarshal event") && 
-		   !contains(msg, "unexpected end of JSON input") {
+		if !contains(msg, "could not unmarshal event") &&
+			!contains(msg, "unexpected end of JSON input") {
 			// Можно включить логирование, если нужно
 			// fmt.Printf("[chromedp] %s\n", msg)
 		}
@@ -73,23 +73,23 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	// Используем контекст браузера напрямую с таймаутом для операции инициализации
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer initCancel() // Отменяем только контекст операции, не основной контекст браузера
-	
+
 	// Простая инициализация - открываем about:blank
-	if err := chromedp.Run(initCtx, 
+	if err := chromedp.Run(initCtx,
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
 		keepAliveCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
-	
+
+	// Запускаем keep-alive механизм СРАЗУ после инициализации
+	// Это гарантирует, что контекст остается активным с самого начала
+	go b.keepAliveLoop()
+
 	// Ждем, чтобы браузер полностью инициализировался
 	// Основной контекст браузера (ctx) остается активным и не отменяется
 	time.Sleep(2 * time.Second)
-
-	// Запускаем keep-alive механизм - периодически проверяем состояние браузера
-	// Это гарантирует, что контекст остается активным
-	go b.keepAliveLoop()
 
 	return b, nil
 }
@@ -98,6 +98,8 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 func (b *Browser) Navigate(url string) error {
 	// Используем контекст браузера напрямую с таймаутом для операции
 	// Основной контекст браузера (b.ctx) остается активным и не отменяется
+	// ВАЖНО: используем b.ctx напрямую, а не создаем новый контекст поверх него
+	// Это гарантирует, что браузер останется открытым
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
@@ -107,6 +109,17 @@ func (b *Browser) Navigate(url string) error {
 		chromedp.Sleep(2*time.Second), // Даем время странице полностью загрузиться и стабилизироваться
 	)
 	
+	// После навигации убеждаемся, что keep-alive работает
+	// Выполняем простую операцию, чтобы контекст оставался активным
+	if err == nil {
+		// Небольшая задержка и проверка, что браузер все еще доступен
+		time.Sleep(500 * time.Millisecond)
+		checkCtx, checkCancel := context.WithTimeout(b.ctx, 2*time.Second)
+		var test string
+		_ = chromedp.Run(checkCtx, chromedp.Evaluate("document.title", &test))
+		checkCancel()
+	}
+
 	if err != nil {
 		// Если ошибка "invalid context", возможно контекст был отменен
 		// Создаем новый контекст браузера из allocCtx
@@ -115,15 +128,15 @@ func (b *Browser) Navigate(url string) error {
 			// Создаем новый контекст браузера
 			newCtx, newCancel := chromedp.NewContext(b.allocCtx)
 			// НЕ используем defer newCancel() - контекст должен остаться живым
-			
+
 			// Обновляем контекст браузера в структуре
 			b.ctx = newCtx
 			b.cancel = newCancel
-			
+
 			// Пробуем снова с новым контекстом
 			ctx2, cancel2 := context.WithTimeout(newCtx, 30*time.Second)
 			defer cancel2()
-			
+
 			return chromedp.Run(ctx2,
 				chromedp.Navigate(url),
 				chromedp.WaitVisible("body", chromedp.ByQuery),
@@ -132,16 +145,16 @@ func (b *Browser) Navigate(url string) error {
 		}
 		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
-	
+
 	return nil
 }
 
 // contains проверяет, содержит ли строка подстроку
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && 
-		(s == substr || 
-		 (len(s) > len(substr) && 
-		  findSubstring(s, substr)))
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			(len(s) > len(substr) &&
+				findSubstring(s, substr)))
 }
 
 func findSubstring(s, substr string) bool {
@@ -158,7 +171,7 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 	// Используем контекст браузера, если он валиден
 	var ctx context.Context
 	var cancel context.CancelFunc
-	
+
 	select {
 	case <-b.ctx.Done():
 		ctx, cancel = context.WithTimeout(b.allocCtx, 10*time.Second)
@@ -351,7 +364,10 @@ func (b *Browser) Screenshot(filename string) error {
 
 // keepAliveLoop периодически проверяет состояние браузера, чтобы контекст оставался активным
 func (b *Browser) keepAliveLoop() {
-	ticker := time.NewTicker(5 * time.Second)
+	// Первая проверка сразу, чтобы контекст был активен с самого начала
+	time.Sleep(1 * time.Second)
+	
+	ticker := time.NewTicker(3 * time.Second) // Уменьшили интервал до 3 секунд для более частых проверок
 	defer ticker.Stop()
 
 	for {
@@ -360,6 +376,7 @@ func (b *Browser) keepAliveLoop() {
 			return
 		case <-ticker.C:
 			// Периодически проверяем URL - это держит контекст активным
+			// Используем b.ctx напрямую, чтобы поддерживать связь с браузером
 			ctx, cancel := context.WithTimeout(b.ctx, 2*time.Second)
 			var url string
 			err := chromedp.Run(ctx,
@@ -371,6 +388,7 @@ func (b *Browser) keepAliveLoop() {
 				if err == context.Canceled || err == context.DeadlineExceeded {
 					return
 				}
+				// Игнорируем другие ошибки - они могут быть временными
 			}
 			// Игнорируем url - нам важно только держать контекст активным
 			_ = url
