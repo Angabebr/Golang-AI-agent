@@ -99,7 +99,17 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	// Запускаем интерактивный режим
 	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("🤖 AI-агент готов к работе!")
-	fmt.Println("Введите задачу для выполнения или 'exit' для выхода")
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Println("\n📝 Как использовать:")
+	fmt.Println("   Просто введите задачу текстом и нажмите Enter")
+	fmt.Println("   Агент будет выполнять её автономно в браузере")
+	fmt.Println("\n💡 Примеры команд:")
+	fmt.Println("   • Прочитай последние 10 писем в яндекс почте и удали спам")
+	fmt.Println("   • Закажи мне BBQ-бургер и картошку фри")
+	fmt.Println("   • Найди 3 подходящие вакансии AI-инженера на hh.ru")
+	fmt.Println("\n⚙️  Служебные команды:")
+	fmt.Println("   • help / помощь - показать эту справку")
+	fmt.Println("   • exit / quit / выход - завершить работу")
 	fmt.Println(strings.Repeat("=", 60) + "\n")
 
 	// Переходим на стартовую страницу (можно изменить)
@@ -133,9 +143,41 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 			continue
 		}
 
-		if task == "exit" || task == "quit" || task == "выход" {
+		// Обработка служебных команд
+		taskLower := strings.ToLower(task)
+		if taskLower == "exit" || taskLower == "quit" || taskLower == "выход" {
 			fmt.Println("👋 До свидания!")
 			break
+		}
+
+		if taskLower == "help" || taskLower == "помощь" || taskLower == "справка" {
+			fmt.Println("\n" + strings.Repeat("=", 60))
+			fmt.Println("📖 Справка по использованию агента")
+			fmt.Println(strings.Repeat("=", 60))
+			fmt.Println("\n🎯 Как давать команды:")
+			fmt.Println("   Просто опишите задачу на русском или английском языке")
+			fmt.Println("   Агент сам поймет, что нужно сделать")
+			fmt.Println("\n📋 Примеры задач:")
+			fmt.Println("   1. Удаление спама:")
+			fmt.Println("      \"Прочитай последние 10 писем в яндекс почте и удали спам\"")
+			fmt.Println("\n   2. Заказ еды:")
+			fmt.Println("      \"Закажи мне BBQ-бургер и картошку фри из того места,")
+			fmt.Println("       откуда я заказывал на прошлой неделе\"")
+			fmt.Println("\n   3. Поиск вакансий:")
+			fmt.Println("      \"Найди 3 подходящие вакансии AI-инженера на hh.ru")
+			fmt.Println("       и откликнись на них с сопроводительным письмом\"")
+			fmt.Println("\n   4. Навигация:")
+			fmt.Println("      \"Перейди на сайт github.com и найди репозиторий golang\"")
+			fmt.Println("\n⚙️  Служебные команды:")
+			fmt.Println("   help / помощь - показать эту справку")
+			fmt.Println("   exit / quit / выход - завершить работу")
+			fmt.Println("\n💡 Советы:")
+			fmt.Println("   • Будьте конкретны в описании задачи")
+			fmt.Println("   • Агент работает автономно - просто наблюдайте")
+			fmt.Println("   • При деструктивных действиях агент спросит подтверждение")
+			fmt.Println("   • Можно давать несколько задач подряд")
+			fmt.Println(strings.Repeat("=", 60) + "\n")
+			continue
 		}
 
 		// Проверяем, есть ли специализированный агент для этой задачи
