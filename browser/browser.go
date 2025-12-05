@@ -48,11 +48,32 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	// Отключаем логирование chromedp полностью - ошибки парсинга не критичны
 	// Они связаны с парсингом событий DevTools Protocol, но не влияют на функциональность
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
-		// Фильтруем несущественные сообщения
+		// Фильтруем несущественные сообщения chromedp
+		// Эти ошибки связаны с парсингом событий DevTools Protocol и не влияют на функциональность
 		msg := fmt.Sprintf(format, v...)
-		if !contains(msg, "could not unmarshal event") &&
-			!contains(msg, "unexpected end of JSON input") {
-			// Можно включить логирование, если нужно
+		
+		// Список паттернов для фильтрации несущественных ошибок
+		ignorePatterns := []string{
+			"could not unmarshal event",
+			"unexpected end of JSON input",
+			"unknown IPAddressSpace value",
+			"unknown PrivateNetworkRequestPolicy value",
+			"parse error",
+			"cookiePart",
+		}
+		
+		// Проверяем, содержит ли сообщение игнорируемые паттерны
+		shouldIgnore := false
+		for _, pattern := range ignorePatterns {
+			if contains(msg, pattern) {
+				shouldIgnore = true
+				break
+			}
+		}
+		
+		// Выводим только важные сообщения
+		if !shouldIgnore {
+			// Можно включить логирование, если нужно для отладки
 			// fmt.Printf("[chromedp] %s\n", msg)
 		}
 	}))
@@ -108,7 +129,7 @@ func (b *Browser) Navigate(url string) error {
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Даем время странице полностью загрузиться и стабилизироваться
 	)
-	
+
 	// После навигации убеждаемся, что keep-alive работает
 	// Выполняем простую операцию, чтобы контекст оставался активным
 	if err == nil {
@@ -366,7 +387,7 @@ func (b *Browser) Screenshot(filename string) error {
 func (b *Browser) keepAliveLoop() {
 	// Первая проверка сразу, чтобы контекст был активен с самого начала
 	time.Sleep(1 * time.Second)
-	
+
 	ticker := time.NewTicker(3 * time.Second) // Уменьшили интервал до 3 секунд для более частых проверок
 	defer ticker.Stop()
 
