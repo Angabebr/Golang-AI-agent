@@ -66,6 +66,16 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		userDataDir = absPath
 	}
 
+	// Предупреждение, если используется стандартная директория Chrome
+	chromeUserData := filepath.Join(os.Getenv("LOCALAPPDATA"), "Google", "Chrome", "User Data")
+	if userDataDir == chromeUserData {
+		fmt.Println("⚠️  ВНИМАНИЕ: Используется стандартная директория Chrome!")
+		fmt.Println("   Убедитесь, что Chrome полностью закрыт перед запуском агента.")
+		fmt.Println("   Рекомендуется использовать отдельную директорию для агента.")
+		fmt.Println("   Для этого в .env укажите: BROWSER_USER_DATA_DIR=./browser_data")
+		fmt.Println()
+	}
+
 	// Создаем директорию browser_data если её нет
 	if err := os.MkdirAll(userDataDir, 0755); err != nil {
 		log.Fatalf("Не удалось создать директорию browser_data (%s): %v\n\nПроверьте права доступа к директории.", userDataDir, err)
