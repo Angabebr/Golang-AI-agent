@@ -15,6 +15,8 @@ type Browser struct {
 	cancel      context.CancelFunc
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
+	keepAlive   context.Context
+	keepAliveCancel context.CancelFunc
 }
 
 // NewBrowser создает новый экземпляр браузера
@@ -55,11 +57,16 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		}
 	}))
 
+	// Создаем контекст для keep-alive механизма
+	keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
+
 	b := &Browser{
-		ctx:         ctx,
-		cancel:      cancel,
-		allocCtx:    allocCtx,
-		allocCancel: allocCancel,
+		ctx:             ctx,
+		cancel:          cancel,
+		allocCtx:        allocCtx,
+		allocCancel:     allocCancel,
+		keepAlive:       keepAliveCtx,
+		keepAliveCancel: keepAliveCancel,
 	}
 
 	// Инициализируем браузер - открываем пустую страницу для проверки
@@ -72,12 +79,17 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
+		keepAliveCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 	
 	// Ждем, чтобы браузер полностью инициализировался
 	// Основной контекст браузера (ctx) остается активным и не отменяется
 	time.Sleep(2 * time.Second)
+
+	// Запускаем keep-alive механизм - периодически проверяем состояние браузера
+	// Это гарантирует, что контекст остается активным
+	go b.keepAliveLoop()
 
 	return b, nil
 }
@@ -337,8 +349,38 @@ func (b *Browser) Screenshot(filename string) error {
 	return os.WriteFile(filename, buf, 0644)
 }
 
+// keepAliveLoop периодически проверяет состояние браузера, чтобы контекст оставался активным
+func (b *Browser) keepAliveLoop() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.keepAlive.Done():
+			return
+		case <-ticker.C:
+			// Периодически проверяем URL - это держит контекст активным
+			ctx, cancel := context.WithTimeout(b.ctx, 2*time.Second)
+			var url string
+			err := chromedp.Run(ctx,
+				chromedp.Evaluate("window.location.href", &url),
+			)
+			cancel()
+			if err != nil {
+				// Если контекст отменен, выходим из цикла
+				if err == context.Canceled || err == context.DeadlineExceeded {
+					return
+				}
+			}
+			// Игнорируем url - нам важно только держать контекст активным
+			_ = url
+		}
+	}
+}
+
 // Close закрывает браузер
 func (b *Browser) Close() error {
+	b.keepAliveCancel()
 	b.cancel()
 	b.allocCancel()
 	return nil
