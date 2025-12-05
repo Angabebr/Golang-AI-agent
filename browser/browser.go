@@ -65,43 +65,42 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Используем контекст браузера (ctx), но создаем новый с таймаутом
-	// Проверяем, что контекст не отменен
-	select {
-	case <-b.ctx.Done():
-		// Контекст отменен, создаем новый на основе allocCtx
-		ctx, cancel := context.WithTimeout(b.allocCtx, 30*time.Second)
-		defer cancel()
-		return chromedp.Run(ctx,
-			chromedp.Navigate(url),
-			chromedp.WaitVisible("body", chromedp.ByQuery),
-		)
-	default:
-		// Контекст валиден, используем его
-		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-		defer cancel()
+	// Используем контекст браузера напрямую с таймаутом
+	// В chromedp контекст браузера должен использоваться напрямую, без создания новых контекстов поверх него
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	defer cancel()
 
-		err := chromedp.Run(ctx,
-			chromedp.Navigate(url),
-			chromedp.WaitVisible("body", chromedp.ByQuery),
-		)
-		
-		if err != nil {
-			// Если ошибка "invalid context", пробуем с allocCtx
-			if err.Error() == "invalid context" || err == context.Canceled {
-				time.Sleep(1 * time.Second)
-				ctx2, cancel2 := context.WithTimeout(b.allocCtx, 30*time.Second)
-				defer cancel2()
-				return chromedp.Run(ctx2,
-					chromedp.Navigate(url),
-					chromedp.WaitVisible("body", chromedp.ByQuery),
-				)
-			}
-			return fmt.Errorf("failed to navigate to %s: %w", url, err)
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.WaitVisible("body", chromedp.ByQuery),
+	)
+	
+	if err != nil {
+		// Если ошибка "invalid context", возможно контекст был отменен
+		// Создаем новый контекст браузера из allocCtx
+		errStr := err.Error()
+		if errStr == "invalid context" || err == context.Canceled {
+			// Создаем новый контекст браузера
+			newCtx, newCancel := chromedp.NewContext(b.allocCtx)
+			defer newCancel()
+			
+			// Обновляем контекст браузера в структуре
+			b.ctx = newCtx
+			b.cancel = newCancel
+			
+			// Пробуем снова с новым контекстом
+			ctx2, cancel2 := context.WithTimeout(newCtx, 30*time.Second)
+			defer cancel2()
+			
+			return chromedp.Run(ctx2,
+				chromedp.Navigate(url),
+				chromedp.WaitVisible("body", chromedp.ByQuery),
+			)
 		}
-		
-		return nil
+		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
+	
+	return nil
 }
 
 // GetPageContent извлекает структурированную информацию о странице
