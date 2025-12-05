@@ -62,12 +62,15 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	defer initCancel()
 
 	// Простая инициализация - открываем about:blank
-	if err := chromedp.Run(initCtx, chromedp.Navigate("about:blank")); err != nil {
+	if err := chromedp.Run(initCtx, 
+		chromedp.Navigate("about:blank"),
+		chromedp.WaitVisible("body", chromedp.ByQuery),
+	); err != nil {
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 
 	// Ждем немного, чтобы браузер полностью инициализировался
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 
 	return b, nil
 }
