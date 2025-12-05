@@ -34,8 +34,6 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
 		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
 		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
-		// Флаги для предотвращения автоматического закрытия
-		chromedp.Flag("remote-debugging-port", "0"),           // Отключить remote debugging (может вызывать проблемы)
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -82,10 +80,14 @@ func (b *Browser) Navigate(url string) error {
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
+	// Используем контекст браузера напрямую, но с таймаутом для безопасности
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	defer cancel()
+
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
-		chromedp.Sleep(1*time.Second), // Даем время странице полностью загрузиться
+		chromedp.Sleep(2*time.Second), // Даем время странице полностью загрузиться и стабилизироваться
 	)
 	
 	if err != nil {
@@ -108,7 +110,7 @@ func (b *Browser) Navigate(url string) error {
 			return chromedp.Run(ctx2,
 				chromedp.Navigate(url),
 				chromedp.WaitVisible("body", chromedp.ByQuery),
-				chromedp.Sleep(1*time.Second),
+				chromedp.Sleep(2*time.Second),
 			)
 		}
 		return fmt.Errorf("failed to navigate to %s: %w", url, err)
