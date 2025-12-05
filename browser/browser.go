@@ -121,26 +121,29 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Используем контекст браузера напрямую с таймаутом для операции
-	// Основной контекст браузера (b.ctx) остается активным и не отменяется
-	// ВАЖНО: используем b.ctx напрямую, а не создаем новый контекст поверх него
-	// Это гарантирует, что браузер останется открытым
-	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-	defer cancel()
+	// Проверяем, не отменен ли основной контекст браузера
+	select {
+	case <-b.ctx.Done():
+		return fmt.Errorf("browser context was canceled before navigation - keep-alive may not be working")
+	default:
+		// Контекст активен, продолжаем
+	}
 
-	err := chromedp.Run(ctx,
+	// Используем контекст браузера напрямую БЕЗ создания нового контекста с таймаутом
+	// Создание нового контекста с таймаутом может привести к преждевременной отмене
+	// Вместо этого используем основной контекст напрямую
+	// Keep-alive механизм уже работает и поддерживает контекст активным
+	
+	err := chromedp.Run(b.ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.Sleep(2*time.Second), // Даем время странице полностью загрузиться и стабилизироваться
 	)
 
 	if err != nil {
-		// Если ошибка "invalid context", возможно контекст был отменен
-		// НО мы НЕ пересоздаем контекст, так как это может привести к открытию второго окна браузера
-		// Вместо этого просто возвращаем ошибку - keep-alive должен поддерживать контекст активным
 		errStr := err.Error()
 		if errStr == "invalid context" || err == context.Canceled {
-			return fmt.Errorf("browser context was canceled - this should not happen if keep-alive is working: %w", err)
+			return fmt.Errorf("browser context was canceled during navigation - keep-alive may not be working: %w", err)
 		}
 		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
