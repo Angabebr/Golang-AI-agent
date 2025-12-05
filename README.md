@@ -35,12 +35,52 @@ cp .env.example .env
 
 ## Использование
 
-Запустите агента:
+### Запуск из исходников:
 ```bash
 go run main.go
 ```
 
+### Сборка и запуск .exe:
+```bash
+# Windows
+build.bat
+# или
+go build -o bin\golang-ai-agent.exe .
+
+# Linux/Mac
+./build.sh
+# или
+go build -o bin/golang-ai-agent .
+```
+
+Запуск собранного файла:
+```bash
+# Windows
+bin\golang-ai-agent.exe
+
+# Linux/Mac
+./bin/golang-ai-agent
+```
+
 Агент откроет браузер и будет ждать ваших команд в терминале.
+
+## Тестирование
+
+Запуск всех тестов:
+```bash
+go test ./... -v
+```
+
+Запуск тестов с покрытием:
+```bash
+go test ./... -coverprofile=coverage.out
+go tool cover -html=coverage.out
+```
+
+Доступные тесты:
+- `context/` - тесты менеджера контекста
+- `security/` - тесты security layer
+- `subagents/` - тесты под-агентов и роутера
 
 ### Примеры задач
 
