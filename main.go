@@ -127,6 +127,9 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	if err != nil {
 		log.Fatalf("\n❌ Не удалось запустить браузер: %v\n\nУбедитесь, что Chrome/Chromium установлен и доступен.", err)
 	}
+	
+	// Опция: оставить браузер открытым после завершения программы
+	// Если нужно, чтобы браузер оставался открытым, закомментируйте следующую строку:
 	defer browserInstance.Close()
 
 	fmt.Println("✅ Браузер запущен")
@@ -213,6 +216,8 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		taskLower := strings.ToLower(task)
 		if taskLower == "exit" || taskLower == "quit" || taskLower == "выход" {
 			fmt.Println("👋 До свидания!")
+			fmt.Println("   Браузер будет закрыт...")
+			// defer browserInstance.Close() закроет браузер автоматически
 			break
 		}
 

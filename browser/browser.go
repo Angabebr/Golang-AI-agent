@@ -120,7 +120,7 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	// Основной контекст браузера (ctx) остается активным и не отменяется
 	// Keep-alive уже работает и поддерживает контекст
 	time.Sleep(2 * time.Second)
-	
+
 	// Выполняем проверку, что контекст все еще активен
 	select {
 	case <-ctx.Done():
