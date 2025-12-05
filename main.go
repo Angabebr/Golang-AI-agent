@@ -190,12 +190,15 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	if err := browserInstance.Navigate(startURL); err != nil {
 		log.Printf("⚠️  Warning: не удалось перейти на стартовую страницу: %v", err)
 		log.Println("   Агент продолжит работу. Вы можете указать URL в команде.")
+		// Не завершаем программу - продолжаем работу
 	} else {
 		fmt.Println("✅ Стартовая страница загружена")
 		// Даем браузеру дополнительное время для стабилизации
-		// Это гарантирует, что браузер останется открытым
 		time.Sleep(1 * time.Second)
 	}
+
+	// Даем пользователю время увидеть сообщения перед началом работы
+	time.Sleep(500 * time.Millisecond)
 
 	// Основной цикл
 	scanner := bufio.NewScanner(os.Stdin)
@@ -212,9 +215,17 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		os.Exit(0)
 	}()
 
+	fmt.Println("\n🎯 Агент готов к вводу команд. Введите задачу или 'help' для справки:")
+
 	for {
 		fmt.Print("\n> ")
 		if !scanner.Scan() {
+			// Если scanner.Scan() возвращает false, проверяем причину
+			if err := scanner.Err(); err != nil {
+				fmt.Printf("\n❌ Ошибка при чтении ввода: %v\n", err)
+			} else {
+				fmt.Println("\n⚠️  Ввод завершен (EOF)")
+			}
 			break
 		}
 
@@ -291,7 +302,10 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		fmt.Println("\n" + strings.Repeat("-", 60))
 	}
 
-	if err := scanner.Err(); err != nil {
-		log.Printf("Ошибка при чтении ввода: %v", err)
+	fmt.Println("\n👋 Программа завершена")
+	if !keepBrowserOpen {
+		fmt.Println("   Закрываем браузер...")
+	} else {
+		fmt.Println("   Браузер останется открытым")
 	}
 }
