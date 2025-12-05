@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
 )
 
-// Browser управляет браузером через chromedp
 type Browser struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -19,7 +19,6 @@ type Browser struct {
 	keepAliveCancel context.CancelFunc
 }
 
-// NewBrowser создает новый экземпляр браузера
 func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", headless),
@@ -28,34 +27,24 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("no-sandbox", false),
 		chromedp.UserDataDir(userDataDir),
 		chromedp.WindowSize(1920, 1080),
-		// Флаги для пропуска окна выбора профиля
-		chromedp.Flag("no-first-run", true),             // Пропустить первый запуск
-		chromedp.Flag("no-default-browser-check", true), // Не проверять браузер по умолчанию
-		chromedp.Flag("disable-default-apps", true),     // Отключить приложения по умолчанию
-		chromedp.Flag("disable-infobars", true),         // Отключить информационные панели
-		chromedp.Flag("disable-popup-blocking", true),   // Отключить блокировку всплывающих окон
-		chromedp.Flag("profile-directory", "Default"),   // Использовать профиль Default
-		chromedp.Flag("disable-extensions", false),      // Можно оставить расширения, если нужно
-		// Флаги для предотвращения автоматического закрытия
-		chromedp.Flag("disable-background-networking", true),       // Отключить фоновые сетевые запросы
-		chromedp.Flag("disable-background-timer-throttling", true), // Отключить throttling таймеров
-		chromedp.Flag("disable-renderer-backgrounding", true),      // Отключить фоновый рендеринг
-		// Флаги для предотвращения открытия нескольких окон
-		chromedp.Flag("single-process", false),                    // НЕ использовать single-process (может вызвать проблемы)
-		chromedp.Flag("disable-features", "VizDisplayCompositor"), // Отключить некоторые функции для стабильности
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("disable-default-apps", true),
+		chromedp.Flag("disable-infobars", true),
+		chromedp.Flag("disable-popup-blocking", true),
+		chromedp.Flag("profile-directory", "Default"),
+		chromedp.Flag("disable-extensions", false),
+		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("disable-background-timer-throttling", true),
+		chromedp.Flag("disable-renderer-backgrounding", true),
+		chromedp.Flag("single-process", false),
+		chromedp.Flag("disable-features", "VizDisplayCompositor"),
 	)
 
-	// Создаем контекст, который не будет отменен автоматически
-	// Используем context.Background() для allocCtx, чтобы он не был отменен
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	// Отключаем логирование chromedp полностью - ошибки парсинга не критичны
-	// Они связаны с парсингом событий DevTools Protocol, но не влияют на функциональность
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
-		// Фильтруем несущественные сообщения chromedp
-		// Эти ошибки связаны с парсингом событий DevTools Protocol и не влияют на функциональность
 		msg := fmt.Sprintf(format, v...)
 
-		// Список паттернов для фильтрации несущественных ошибок
 		ignorePatterns := []string{
 			"could not unmarshal event",
 			"unexpected end of JSON input",
@@ -65,7 +54,6 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 			"cookiePart",
 		}
 
-		// Проверяем, содержит ли сообщение игнорируемые паттерны
 		shouldIgnore := false
 		for _, pattern := range ignorePatterns {
 			if contains(msg, pattern) {
@@ -74,14 +62,10 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 			}
 		}
 
-		// Выводим только важные сообщения
 		if !shouldIgnore {
-			// Можно включить логирование, если нужно для отладки
-			// fmt.Printf("[chromedp] %s\n", msg)
 		}
 	}))
 
-	// Создаем контекст для keep-alive механизма
 	keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 
 	b := &Browser{
@@ -93,65 +77,37 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		keepAliveCancel: keepAliveCancel,
 	}
 
-	// Запускаем keep-alive механизм СРАЗУ, ДО инициализации браузера
-	// Это гарантирует, что контекст будет поддерживаться с самого начала
-	go b.keepAliveLoop()
-
-	// Инициализируем браузер - открываем пустую страницу для проверки
-	// Используем контекст браузера напрямую с таймаутом для операции инициализации
-	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-
-	// Простая инициализация - открываем about:blank
-	if err := chromedp.Run(initCtx,
+	if err := chromedp.Run(ctx,
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
-		initCancel()
 		keepAliveCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n- Директория браузера занята другим процессом\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 
-	// НЕ отменяем initCancel сразу - даем браузеру время инициализироваться
-	// Отменяем только после задержки, чтобы основной контекст не был затронут
-	time.Sleep(1 * time.Second)
-	initCancel()
-
-	// Ждем, чтобы браузер полностью инициализировался
-	// Основной контекст браузера (ctx) остается активным и не отменяется
-	// Keep-alive уже работает и поддерживает контекст
-	time.Sleep(2 * time.Second)
-
-	// Выполняем проверку, что контекст все еще активен
 	select {
 	case <-ctx.Done():
 		keepAliveCancel()
-		return nil, fmt.Errorf("browser context was canceled during initialization")
+		return nil, fmt.Errorf("browser context was canceled after initialization")
 	default:
-		// Контекст активен, продолжаем
 	}
+
+	go b.keepAliveLoop()
 
 	return b, nil
 }
 
-// Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Проверяем, не отменен ли основной контекст браузера
 	select {
 	case <-b.ctx.Done():
 		return fmt.Errorf("browser context was canceled before navigation - keep-alive may not be working")
 	default:
-		// Контекст активен, продолжаем
 	}
-
-	// Используем контекст браузера напрямую БЕЗ создания нового контекста с таймаутом
-	// Создание нового контекста с таймаутом может привести к преждевременной отмене
-	// Вместо этого используем основной контекст напрямую
-	// Keep-alive механизм уже работает и поддерживает контекст активным
 
 	err := chromedp.Run(b.ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
-		chromedp.Sleep(2*time.Second), // Даем время странице полностью загрузиться и стабилизироваться
+		chromedp.Sleep(2*time.Second),
 	)
 
 	if err != nil {
@@ -162,14 +118,11 @@ func (b *Browser) Navigate(url string) error {
 		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 
-	// После успешной навигации даем браузеру время стабилизироваться
-	// Keep-alive механизм уже работает и поддерживает контекст активным
 	time.Sleep(500 * time.Millisecond)
 
 	return nil
 }
 
-// contains проверяет, содержит ли строка подстроку
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) &&
 		(s == substr ||
@@ -186,18 +139,8 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-// GetPageContent извлекает структурированную информацию о странице
 func (b *Browser) GetPageContent() (*PageContent, error) {
-	// Используем контекст браузера, если он валиден
-	var ctx context.Context
-	var cancel context.CancelFunc
-
-	select {
-	case <-b.ctx.Done():
-		ctx, cancel = context.WithTimeout(b.allocCtx, 10*time.Second)
-	default:
-		ctx, cancel = context.WithTimeout(b.ctx, 10*time.Second)
-	}
+	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
 	var content PageContent
@@ -242,39 +185,121 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 	return &content, nil
 }
 
-// ClickElement кликает на элемент по селектору
 func (b *Browser) ClickElement(selector string) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
 	defer cancel()
 
 	return chromedp.Run(ctx,
 		chromedp.WaitVisible(selector, chromedp.ByQuery),
 		chromedp.Click(selector, chromedp.ByQuery),
-		chromedp.Sleep(1*time.Second), // Даем время на загрузку
+		chromedp.Sleep(1*time.Second),
 	)
 }
 
-// ClickByText кликает на элемент по тексту
 func (b *Browser) ClickByText(text string) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 20*time.Second)
 	defer cancel()
+
+	escapedText := escapeJSString(text)
 
 	script := fmt.Sprintf(`
 		(function() {
-			const elements = Array.from(document.querySelectorAll('*'));
-			const target = elements.find(el => {
-				const elText = el.innerText || el.textContent || '';
-				return elText.trim().toLowerCase().includes('%s'.toLowerCase()) && 
-					   el.offsetParent !== null &&
-					   (el.tagName === 'BUTTON' || el.tagName === 'A' || el.getAttribute('role') === 'button' || el.onclick !== null);
+			const searchText = '%s';
+			const searchLower = searchText.toLowerCase().trim();
+			
+			function isVisible(el) {
+				if (!el) return false;
+				const style = window.getComputedStyle(el);
+				return style.display !== 'none' && 
+					   style.visibility !== 'hidden' && 
+					   style.opacity !== '0' &&
+					   el.offsetWidth > 0 && 
+					   el.offsetHeight > 0;
+			}
+			
+			function isClickable(el) {
+				if (!el) return false;
+				const tag = el.tagName;
+				const role = el.getAttribute('role');
+				const clickable = el.onclick || el.getAttribute('onclick');
+				const hasPointer = window.getComputedStyle(el).cursor === 'pointer';
+				
+				return tag === 'BUTTON' || 
+					   tag === 'A' || 
+					   tag === 'INPUT' ||
+					   role === 'button' || 
+					   role === 'link' ||
+					   clickable !== null ||
+					   hasPointer ||
+					   el.classList.contains('button') ||
+					   el.classList.contains('btn');
+			}
+			
+			function getDirectText(el) {
+				return Array.from(el.childNodes)
+					.filter(node => node.nodeType === Node.TEXT_NODE)
+					.map(node => node.textContent)
+					.join(' ')
+					.trim();
+			}
+			
+			const allElements = Array.from(document.querySelectorAll('*'));
+			
+			let target = allElements.find(el => {
+				if (!isVisible(el) || !isClickable(el)) return false;
+				const text = (el.innerText || el.textContent || '').trim();
+				return text.toLowerCase() === searchLower;
 			});
+			
+			if (!target) {
+				target = allElements.find(el => {
+					if (!isVisible(el) || !isClickable(el)) return false;
+					const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+					return text.toLowerCase() === searchLower.replace(/\s+/g, ' ');
+				});
+			}
+			
+			if (!target) {
+				target = allElements.find(el => {
+					if (!isVisible(el) || !isClickable(el)) return false;
+					const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+					return text.includes(searchLower);
+				});
+			}
+			
+			if (!target) {
+				target = allElements.find(el => {
+					if (!isVisible(el)) return false;
+					const text = (el.innerText || el.textContent || '').trim();
+					return text.toLowerCase() === searchLower;
+				});
+			}
+			
+			if (!target) {
+				target = allElements.find(el => {
+					if (!isVisible(el)) return false;
+					const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+					return text.includes(searchLower);
+				});
+			}
+			
 			if (target) {
-				target.click();
+				try {
+					target.click();
+				} catch (e) {
+					const event = new MouseEvent('click', {
+						bubbles: true,
+						cancelable: true,
+						view: window
+					});
+					target.dispatchEvent(event);
+				}
 				return true;
 			}
+			
 			return false;
 		})()
-	`, text)
+	`, escapedText)
 
 	var clicked bool
 	err := chromedp.Run(ctx,
@@ -293,9 +318,8 @@ func (b *Browser) ClickByText(text string) error {
 	return nil
 }
 
-// FillInput заполняет поле ввода
 func (b *Browser) FillInput(selector, value string) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 15*time.Second)
 	defer cancel()
 
 	return chromedp.Run(ctx,
@@ -306,24 +330,44 @@ func (b *Browser) FillInput(selector, value string) error {
 	)
 }
 
-// FillInputByPlaceholder заполняет поле по placeholder
 func (b *Browser) FillInputByPlaceholder(placeholder, value string) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 15*time.Second)
 	defer cancel()
+
+	escapedPlaceholder := escapeJSString(placeholder)
+	escapedValue := escapeJSString(value)
 
 	script := fmt.Sprintf(`
 		(function() {
+			const searchText = '%s'.toLowerCase();
 			const inputs = Array.from(document.querySelectorAll('input, textarea'));
-			const target = inputs.find(i => i.placeholder && i.placeholder.toLowerCase().includes('%s'.toLowerCase()) && i.offsetParent !== null);
+			
+			const target = inputs.find(i => {
+				if (i.offsetParent === null && i.type !== 'hidden') return false;
+				
+				const placeholder = (i.placeholder || '').toLowerCase();
+				const name = (i.name || '').toLowerCase();
+				const id = (i.id || '').toLowerCase();
+				const ariaLabel = (i.getAttribute('aria-label') || '').toLowerCase();
+				
+				return placeholder.includes(searchText) || 
+					   name.includes(searchText) || 
+					   name === searchText ||
+					   id.includes(searchText) || 
+					   ariaLabel.includes(searchText);
+			});
+			
 			if (target) {
+				target.focus();
 				target.value = '%s';
 				target.dispatchEvent(new Event('input', { bubbles: true }));
 				target.dispatchEvent(new Event('change', { bubbles: true }));
+				target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
 				return true;
 			}
 			return false;
 		})()
-	`, placeholder, value)
+	`, escapedPlaceholder, escapedValue)
 
 	var filled bool
 	err := chromedp.Run(ctx,
@@ -336,15 +380,14 @@ func (b *Browser) FillInputByPlaceholder(placeholder, value string) error {
 	}
 
 	if !filled {
-		return fmt.Errorf("input with placeholder '%s' not found", placeholder)
+		return fmt.Errorf("input field matching '%s' not found (tried placeholder, name, id, aria-label)", placeholder)
 	}
 
 	return nil
 }
 
-// WaitForElement ждет появления элемента
 func (b *Browser) WaitForElement(selector string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, timeout)
+	ctx, cancel := context.WithTimeout(b.ctx, timeout)
 	defer cancel()
 
 	return chromedp.Run(ctx,
@@ -352,9 +395,8 @@ func (b *Browser) WaitForElement(selector string, timeout time.Duration) error {
 	)
 }
 
-// GetCurrentURL возвращает текущий URL
 func (b *Browser) GetCurrentURL() (string, error) {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
 	defer cancel()
 
 	var url string
@@ -365,9 +407,8 @@ func (b *Browser) GetCurrentURL() (string, error) {
 	return url, err
 }
 
-// Screenshot делает скриншот страницы
 func (b *Browser) Screenshot(filename string) error {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.ctx, 15*time.Second)
 	defer cancel()
 
 	var buf []byte
@@ -382,38 +423,17 @@ func (b *Browser) Screenshot(filename string) error {
 	return os.WriteFile(filename, buf, 0644)
 }
 
-// keepAliveLoop периодически проверяет состояние браузера, чтобы контекст оставался активным
 func (b *Browser) keepAliveLoop() {
-	// Первая проверка сразу, без задержки - важно начать поддерживать контекст как можно раньше
-	// Но даем небольшую задержку, чтобы браузер успел запуститься
-	time.Sleep(100 * time.Millisecond)
-
-	// Выполняем первую проверку сразу, чтобы контекст был активен
-	// Проверяем, не отменен ли контекст перед первой проверкой
-	select {
-	case <-b.ctx.Done():
-		// Контекст уже отменен, выходим
-		return
-	default:
-		// Контекст активен, выполняем проверку
-		firstCtx, firstCancel := context.WithTimeout(b.ctx, 3*time.Second)
-		var firstUrl string
-		_ = chromedp.Run(firstCtx, chromedp.Evaluate("window.location.href", &firstUrl))
-		firstCancel()
-		_ = firstUrl
-	}
-
-	ticker := time.NewTicker(1 * time.Minute) // Проверяем каждую минуту
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-b.keepAlive.Done():
 			return
+		case <-b.ctx.Done():
+			return
 		case <-ticker.C:
-			// Периодически проверяем URL - это держит контекст активным
-			// Используем b.ctx напрямую, чтобы поддерживать связь с браузером
-			// НЕ создаем новый контекст браузера - используем существующий
 			ctx, cancel := context.WithTimeout(b.ctx, 2*time.Second)
 			var url string
 			err := chromedp.Run(ctx,
@@ -421,20 +441,15 @@ func (b *Browser) keepAliveLoop() {
 			)
 			cancel()
 			if err != nil {
-				// Если контекст отменен, выходим из цикла
 				if err == context.Canceled || err == context.DeadlineExceeded {
 					return
 				}
-				// Игнорируем другие ошибки - они могут быть временными
-				// Не пересоздаем контекст, чтобы избежать открытия второго окна браузера
 			}
-			// Игнорируем url - нам важно только держать контекст активным
 			_ = url
 		}
 	}
 }
 
-// Close закрывает браузер
 func (b *Browser) Close() error {
 	b.keepAliveCancel()
 	b.cancel()
@@ -442,7 +457,6 @@ func (b *Browser) Close() error {
 	return nil
 }
 
-// PageContent содержит структурированную информацию о странице
 type PageContent struct {
 	URL      string    `json:"url"`
 	Title    string    `json:"title"`
@@ -472,4 +486,14 @@ type Input struct {
 type Heading struct {
 	Level string `json:"level"`
 	Text  string `json:"text"`
+}
+
+func escapeJSString(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "'", "\\'")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	s = strings.ReplaceAll(s, "\r", "\\r")
+	s = strings.ReplaceAll(s, "\t", "\\t")
+	return s
 }

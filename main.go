@@ -16,45 +16,29 @@ import (
 	"github.com/Angabebr/Golang-AI-agent/agent"
 	"github.com/Angabebr/Golang-AI-agent/ai"
 	"github.com/Angabebr/Golang-AI-agent/browser"
-	ctxmgr "github.com/Angabebr/Golang-AI-agent/context"
-	"github.com/Angabebr/Golang-AI-agent/security"
-	"github.com/Angabebr/Golang-AI-agent/subagents"
 	"github.com/joho/godotenv"
 )
 
-// ErrorFilterWriter фильтрует некритичные ошибки chromedp
 type ErrorFilterWriter struct {
 	original io.Writer
 }
 
 func (w *ErrorFilterWriter) Write(p []byte) (n int, err error) {
 	msg := string(p)
-	// Фильтруем некритичные ошибки парсинга событий
 	if strings.Contains(msg, "ERROR: could not unmarshal event") ||
 		strings.Contains(msg, "parse error: expected string") ||
 		strings.Contains(msg, "unknown IPAddressSpace value: Loopback") {
-		// Пропускаем эти ошибки - они не критичны
 		return len(p), nil
 	}
-	// Выводим все остальное
 	return w.original.Write(p)
 }
 
 func main() {
-	// Примечание: chromedp может выводить ошибки парсинга событий в stderr
-	// Эти ошибки ("could not unmarshal event", "unknown IPAddressSpace") не критичны
-	// и не влияют на функциональность - они связаны с парсингом DevTools Protocol
-	// Можно игнорировать их или фильтровать через перенаправление stderr при запуске:
-	// .\Golang-AI-agent.exe 2>nul  (Windows)
-	// ./golang-ai-agent 2>/dev/null  (Linux/Mac)
-
-	// Загружаем переменные окружения
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found or error loading: %v", err)
 		log.Println("Попытка продолжить с переменными окружения системы...")
 	}
 
-	// Получаем конфигурацию
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		log.Fatal(`
@@ -64,7 +48,6 @@ func main() {
 OPENAI_API_KEY=your_api_key_here
 OPENAI_MODEL=gpt-4-turbo-preview
 BROWSER_USER_DATA_DIR=./browser_data
-ENABLE_SECURITY_LAYER=true
 START_URL=https://www.google.com
 
 Или установите переменную окружения:
@@ -83,7 +66,6 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		userDataDir = "./browser_data"
 	}
 
-	// Преобразуем относительный путь в абсолютный
 	if !filepath.IsAbs(userDataDir) {
 		absPath, err := filepath.Abs(userDataDir)
 		if err != nil {
@@ -92,7 +74,6 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		userDataDir = absPath
 	}
 
-	// Предупреждение, если используется стандартная директория Chrome
 	chromeUserData := filepath.Join(os.Getenv("LOCALAPPDATA"), "Google", "Chrome", "User Data")
 	if userDataDir == chromeUserData {
 		fmt.Println("⚠️  ВНИМАНИЕ: Используется стандартная директория Chrome!")
@@ -102,36 +83,27 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		fmt.Println()
 	}
 
-	// Создаем директорию browser_data если её нет
 	if err := os.MkdirAll(userDataDir, 0755); err != nil {
 		log.Fatalf("Не удалось создать директорию browser_data (%s): %v\n\nПроверьте права доступа к директории.", userDataDir, err)
 	}
 
-	// Проверяем права на запись
 	testFile := filepath.Join(userDataDir, ".test_write")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		log.Fatalf("Нет прав на запись в директорию browser_data (%s): %v\n\nПроверьте права доступа.", userDataDir, err)
 	}
-	os.Remove(testFile) // Удаляем тестовый файл
+	os.Remove(testFile)
 
-	enableSecurity := os.Getenv("ENABLE_SECURITY_LAYER")
-	securityEnabled := enableSecurity != "false"
-
-	// Опция: оставить браузер открытым после завершения программы
 	keepBrowserOpen := os.Getenv("KEEP_BROWSER_OPEN") == "true"
 
-	// Создаем компоненты
 	fmt.Println("🚀 Инициализация AI-агента...")
 	fmt.Printf("📁 Директория браузера: %s\n", userDataDir)
-
-	// Создаем браузер (не headless, чтобы видеть процесс)
 	fmt.Println("🌐 Запуск браузера...")
+
 	browserInstance, err := browser.NewBrowser(userDataDir, false)
 	if err != nil {
 		log.Fatalf("\n❌ Не удалось запустить браузер: %v\n\nУбедитесь, что Chrome/Chromium установлен и доступен.", err)
 	}
 
-	// Закрываем браузер при завершении программы (если не указано иное)
 	if !keepBrowserOpen {
 		defer browserInstance.Close()
 	} else {
@@ -140,31 +112,15 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 
 	fmt.Println("✅ Браузер запущен")
 
-	// Создаем AI клиент
 	aiClient := ai.NewClient(apiKey, model)
 	fmt.Println("✅ AI клиент инициализирован")
 
-	// Создаем менеджер контекста
-	ctxManager := ctxmgr.NewManager(8000) // ~8000 токенов максимум
-	fmt.Println("✅ Менеджер контекста создан")
-
-	// Создаем security layer
-	securityLayer := security.NewLayer(securityEnabled)
-	fmt.Println("✅ Security layer активирован")
-
-	// Создаем роутер под-агентов
-	subAgentRouter := subagents.NewRouter()
-	fmt.Println("✅ Роутер под-агентов создан")
-
-	// Создаем основной агент
-	mainAgent := agent.NewAgent(browserInstance, aiClient, ctxManager, securityLayer)
+	mainAgent := agent.NewAgent(browserInstance, aiClient)
 	fmt.Println("✅ Основной агент создан")
 
-	// Обработка сигналов для корректного завершения
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	// Запускаем интерактивный режим
 	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("🤖 AI-агент готов к работе!")
 	fmt.Println(strings.Repeat("=", 60))
@@ -180,32 +136,28 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	fmt.Println("   • exit / quit / выход - завершить работу")
 	fmt.Println(strings.Repeat("=", 60) + "\n")
 
-	// Переходим на стартовую страницу (можно изменить)
 	startURL := os.Getenv("START_URL")
 	if startURL == "" {
 		startURL = "https://www.google.com"
 	}
 
 	fmt.Printf("🌐 Переход на стартовую страницу: %s\n", startURL)
-	if err := browserInstance.Navigate(startURL); err != nil {
-		log.Printf("⚠️  Warning: не удалось перейти на стартовую страницу: %v", err)
+	navErr := browserInstance.Navigate(startURL)
+	if navErr != nil {
+		log.Printf("⚠️  Warning: не удалось перейти на стартовую страницу: %v", navErr)
 		log.Println("   Агент продолжит работу. Вы можете указать URL в команде.")
-		// Не завершаем программу - продолжаем работу
 	} else {
 		fmt.Println("✅ Стартовая страница загружена")
-		// Даем браузеру дополнительное время для стабилизации
 		time.Sleep(1 * time.Second)
 	}
 
-	// Даем пользователю время увидеть сообщения перед началом работы
 	time.Sleep(500 * time.Millisecond)
 
-	// Основной цикл
 	scanner := bufio.NewScanner(os.Stdin)
 
 	go func() {
 		<-sigChan
-		fmt.Println("\n\n🛑 Получен сигнал завершения...")
+		fmt.Println("\n\n🛑 Получен сигнал завершения (Ctrl+C)...")
 		if !keepBrowserOpen {
 			fmt.Println("   Браузер будет закрыт...")
 			browserInstance.Close()
@@ -219,12 +171,14 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 
 	for {
 		fmt.Print("\n> ")
-		if !scanner.Scan() {
-			// Если scanner.Scan() возвращает false, проверяем причину
+
+		scanResult := scanner.Scan()
+
+		if !scanResult {
 			if err := scanner.Err(); err != nil {
 				fmt.Printf("\n❌ Ошибка при чтении ввода: %v\n", err)
 			} else {
-				fmt.Println("\n⚠️  Ввод завершен (EOF)")
+				fmt.Println("\n⚠️  Ввод завершен (EOF) - stdin закрыт")
 			}
 			break
 		}
@@ -234,7 +188,6 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 			continue
 		}
 
-		// Обработка служебных команд
 		taskLower := strings.ToLower(task)
 		if taskLower == "exit" || taskLower == "quit" || taskLower == "выход" {
 			fmt.Println("👋 До свидания!")
@@ -243,7 +196,6 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 			} else {
 				fmt.Println("   Браузер останется открытым")
 			}
-			// defer browserInstance.Close() закроет браузер автоматически (если keepBrowserOpen = false)
 			break
 		}
 
@@ -271,19 +223,11 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 			fmt.Println("\n💡 Советы:")
 			fmt.Println("   • Будьте конкретны в описании задачи")
 			fmt.Println("   • Агент работает автономно - просто наблюдайте")
-			fmt.Println("   • При деструктивных действиях агент спросит подтверждение")
 			fmt.Println("   • Можно давать несколько задач подряд")
 			fmt.Println(strings.Repeat("=", 60) + "\n")
 			continue
 		}
 
-		// Проверяем, есть ли специализированный агент для этой задачи
-		subAgent := subAgentRouter.Route(task)
-		if subAgent != nil {
-			fmt.Printf("🎯 Используется специализированный агент: %s\n\n", subAgent.GetName())
-		}
-
-		// Выполняем задачу
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 
 		startTime := time.Now()
@@ -308,4 +252,7 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	} else {
 		fmt.Println("   Браузер останется открытым")
 	}
+
+	fmt.Println("\nНажмите Enter для выхода...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 }
