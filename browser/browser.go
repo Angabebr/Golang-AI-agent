@@ -48,48 +48,74 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		allocCancel: allocCancel,
 	}
 
-	// Устанавливаем таймаут для инициализации
-	initCtx, timeout := context.WithTimeout(ctx, 30*time.Second)
-	defer timeout()
+	// Инициализируем браузер - открываем пустую страницу для проверки
+	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel()
 
-	if err := chromedp.Run(initCtx); err != nil {
+	// Простая инициализация - открываем about:blank
+	if err := chromedp.Run(initCtx, chromedp.Navigate("about:blank")); err != nil {
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
+
+	// Ждем немного, чтобы браузер полностью инициализировался
+	time.Sleep(500 * time.Millisecond)
 
 	return b, nil
 }
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Создаем новый контекст на основе allocCtx, чтобы избежать проблем с отмененным контекстом
-	ctx, cancel := context.WithTimeout(b.allocCtx, 30*time.Second)
-	defer cancel()
+	// Используем контекст браузера (ctx), но создаем новый с таймаутом
+	// Проверяем, что контекст не отменен
+	select {
+	case <-b.ctx.Done():
+		// Контекст отменен, создаем новый на основе allocCtx
+		ctx, cancel := context.WithTimeout(b.allocCtx, 30*time.Second)
+		defer cancel()
+		return chromedp.Run(ctx,
+			chromedp.Navigate(url),
+			chromedp.WaitVisible("body", chromedp.ByQuery),
+		)
+	default:
+		// Контекст валиден, используем его
+		ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+		defer cancel()
 
-	err := chromedp.Run(ctx,
-		chromedp.Navigate(url),
-		chromedp.WaitVisible("body", chromedp.ByQuery),
-	)
-	
-	if err != nil {
-		// Если ошибка из-за отмены контекста, пробуем еще раз с небольшим ожиданием
-		if err == context.Canceled || err == context.DeadlineExceeded {
-			time.Sleep(1 * time.Second)
-			ctx2, cancel2 := context.WithTimeout(b.allocCtx, 30*time.Second)
-			defer cancel2()
-			return chromedp.Run(ctx2,
-				chromedp.Navigate(url),
-				chromedp.WaitVisible("body", chromedp.ByQuery),
-			)
+		err := chromedp.Run(ctx,
+			chromedp.Navigate(url),
+			chromedp.WaitVisible("body", chromedp.ByQuery),
+		)
+		
+		if err != nil {
+			// Если ошибка "invalid context", пробуем с allocCtx
+			if err.Error() == "invalid context" || err == context.Canceled {
+				time.Sleep(1 * time.Second)
+				ctx2, cancel2 := context.WithTimeout(b.allocCtx, 30*time.Second)
+				defer cancel2()
+				return chromedp.Run(ctx2,
+					chromedp.Navigate(url),
+					chromedp.WaitVisible("body", chromedp.ByQuery),
+				)
+			}
+			return fmt.Errorf("failed to navigate to %s: %w", url, err)
 		}
-		return fmt.Errorf("failed to navigate to %s: %w", url, err)
+		
+		return nil
 	}
-	
-	return nil
 }
 
 // GetPageContent извлекает структурированную информацию о странице
 func (b *Browser) GetPageContent() (*PageContent, error) {
-	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
+	// Используем контекст браузера, если он валиден
+	var ctx context.Context
+	var cancel context.CancelFunc
+	
+	select {
+	case <-b.ctx.Done():
+		ctx, cancel = context.WithTimeout(b.allocCtx, 10*time.Second)
+	default:
+		ctx, cancel = context.WithTimeout(b.ctx, 10*time.Second)
+	}
 	defer cancel()
 
 	var content PageContent
