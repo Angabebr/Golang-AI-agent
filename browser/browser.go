@@ -26,6 +26,14 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("no-sandbox", false),
 		chromedp.UserDataDir(userDataDir),
 		chromedp.WindowSize(1920, 1080),
+		// Флаги для пропуска окна выбора профиля
+		chromedp.Flag("no-first-run", true),                    // Пропустить первый запуск
+		chromedp.Flag("no-default-browser-check", true),        // Не проверять браузер по умолчанию
+		chromedp.Flag("disable-default-apps", true),            // Отключить приложения по умолчанию
+		chromedp.Flag("disable-infobars", true),                // Отключить информационные панели
+		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
+		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
+		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
