@@ -80,10 +80,6 @@ func (b *Browser) Navigate(url string) error {
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
-	// Используем контекст браузера напрямую, но с таймаутом для безопасности
-	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
-	defer cancel()
-
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
