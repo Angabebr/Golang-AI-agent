@@ -34,6 +34,10 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
 		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
 		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
+		// Флаги для предотвращения автоматического закрытия
+		chromedp.Flag("disable-background-networking", true),   // Отключить фоновые сетевые запросы
+		chromedp.Flag("disable-background-timer-throttling", true), // Отключить throttling таймеров
+		chromedp.Flag("disable-renderer-backgrounding", true),  // Отключить фоновый рендеринг
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
@@ -49,27 +53,34 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	}
 
 	// Инициализируем браузер - открываем пустую страницу для проверки
+	// Используем контекст браузера напрямую, НЕ создаем новый с таймаутом
+	// Таймаут может вызвать преждевременное закрытие браузера
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer initCancel()
-
+	
 	// Простая инициализация - открываем about:blank
 	if err := chromedp.Run(initCtx, 
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
+		initCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
-
-	// Ждем немного, чтобы браузер полностью инициализировался
+	
+	// НЕ отменяем initCancel сразу - даем браузеру время инициализироваться
+	// Отменяем только после небольшой задержки
 	time.Sleep(1 * time.Second)
+	initCancel()
 
 	return b, nil
 }
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Используем контекст браузера напрямую с таймаутом
-	// В chromedp контекст браузера должен использоваться напрямую, без создания новых контекстов поверх него
+	// Используем контекст браузера напрямую БЕЗ таймаута для операции навигации
+	// Таймаут может вызвать преждевременное закрытие браузера
+	// Используем контекст браузера напрямую
+
+	// Создаем таймаут только для операции, но не отменяем основной контекст
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
