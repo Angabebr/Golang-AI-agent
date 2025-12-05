@@ -151,8 +151,12 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		startURL = "https://www.google.com"
 	}
 
+	fmt.Printf("🌐 Переход на стартовую страницу: %s\n", startURL)
 	if err := browserInstance.Navigate(startURL); err != nil {
-		log.Printf("Warning: не удалось перейти на стартовую страницу: %v", err)
+		log.Printf("⚠️  Warning: не удалось перейти на стартовую страницу: %v", err)
+		log.Println("   Агент продолжит работу. Вы можете указать URL в команде.")
+	} else {
+		fmt.Println("✅ Стартовая страница загружена")
 	}
 
 	// Основной цикл

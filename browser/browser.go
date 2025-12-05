@@ -53,18 +53,35 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
+	// Создаем новый контекст на основе allocCtx, чтобы избежать проблем с отмененным контекстом
+	ctx, cancel := context.WithTimeout(b.allocCtx, 30*time.Second)
 	defer cancel()
 
-	return chromedp.Run(ctx,
+	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	)
+	
+	if err != nil {
+		// Если ошибка из-за отмены контекста, пробуем еще раз с небольшим ожиданием
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			time.Sleep(1 * time.Second)
+			ctx2, cancel2 := context.WithTimeout(b.allocCtx, 30*time.Second)
+			defer cancel2()
+			return chromedp.Run(ctx2,
+				chromedp.Navigate(url),
+				chromedp.WaitVisible("body", chromedp.ByQuery),
+			)
+		}
+		return fmt.Errorf("failed to navigate to %s: %w", url, err)
+	}
+	
+	return nil
 }
 
 // GetPageContent извлекает структурированную информацию о странице
 func (b *Browser) GetPageContent() (*PageContent, error) {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	var content PageContent
@@ -111,7 +128,7 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 
 // ClickElement кликает на элемент по селектору
 func (b *Browser) ClickElement(selector string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	return chromedp.Run(ctx,
@@ -123,7 +140,7 @@ func (b *Browser) ClickElement(selector string) error {
 
 // ClickByText кликает на элемент по тексту
 func (b *Browser) ClickByText(text string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	script := fmt.Sprintf(`
@@ -162,7 +179,7 @@ func (b *Browser) ClickByText(text string) error {
 
 // FillInput заполняет поле ввода
 func (b *Browser) FillInput(selector, value string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	return chromedp.Run(ctx,
@@ -175,7 +192,7 @@ func (b *Browser) FillInput(selector, value string) error {
 
 // FillInputByPlaceholder заполняет поле по placeholder
 func (b *Browser) FillInputByPlaceholder(placeholder, value string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	script := fmt.Sprintf(`
@@ -211,7 +228,7 @@ func (b *Browser) FillInputByPlaceholder(placeholder, value string) error {
 
 // WaitForElement ждет появления элемента
 func (b *Browser) WaitForElement(selector string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(b.ctx, timeout)
+	ctx, cancel := context.WithTimeout(b.allocCtx, timeout)
 	defer cancel()
 
 	return chromedp.Run(ctx,
@@ -221,7 +238,7 @@ func (b *Browser) WaitForElement(selector string, timeout time.Duration) error {
 
 // GetCurrentURL возвращает текущий URL
 func (b *Browser) GetCurrentURL() (string, error) {
-	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 5*time.Second)
 	defer cancel()
 
 	var url string
@@ -234,7 +251,7 @@ func (b *Browser) GetCurrentURL() (string, error) {
 
 // Screenshot делает скриншот страницы
 func (b *Browser) Screenshot(filename string) error {
-	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(b.allocCtx, 10*time.Second)
 	defer cancel()
 
 	var buf []byte
