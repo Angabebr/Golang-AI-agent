@@ -93,32 +93,28 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		keepAliveCancel: keepAliveCancel,
 	}
 
+	// Запускаем keep-alive механизм СРАЗУ, ДО инициализации браузера
+	// Это гарантирует, что контекст будет поддерживаться с самого начала
+	go b.keepAliveLoop()
+
 	// Инициализируем браузер - открываем пустую страницу для проверки
 	// Используем контекст браузера напрямую с таймаутом для операции инициализации
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel() // Отменяем только контекст операции, не основной контекст браузера
 
 	// Простая инициализация - открываем about:blank
 	if err := chromedp.Run(initCtx,
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
-		initCancel()
 		keepAliveCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n- Директория браузера занята другим процессом\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 
-	// НЕ отменяем initCancel сразу - даем браузеру время инициализироваться
-	// Отменяем только после небольшой задержки
-	time.Sleep(1 * time.Second)
-	initCancel()
-
-	// Запускаем keep-alive механизм СРАЗУ после инициализации
-	// Это гарантирует, что контекст остается активным с самого начала
-	go b.keepAliveLoop()
-
 	// Ждем, чтобы браузер полностью инициализировался
 	// Основной контекст браузера (ctx) остается активным и не отменяется
-	time.Sleep(1 * time.Second)
+	// Keep-alive уже работает и поддерживает контекст
+	time.Sleep(2 * time.Second)
 
 	return b, nil
 }
@@ -371,10 +367,18 @@ func (b *Browser) Screenshot(filename string) error {
 
 // keepAliveLoop периодически проверяет состояние браузера, чтобы контекст оставался активным
 func (b *Browser) keepAliveLoop() {
-	// Первая проверка через небольшую задержку, чтобы браузер успел инициализироваться
-	time.Sleep(500 * time.Millisecond)
+	// Первая проверка сразу, без задержки - важно начать поддерживать контекст как можно раньше
+	// Но даем небольшую задержку, чтобы браузер успел запуститься
+	time.Sleep(200 * time.Millisecond)
 
-	ticker := time.NewTicker(2 * time.Second) // Проверяем каждые 2 секунды для более частого поддержания связи
+	// Выполняем первую проверку сразу, чтобы контекст был активен
+	firstCtx, firstCancel := context.WithTimeout(b.ctx, 3*time.Second)
+	var firstUrl string
+	_ = chromedp.Run(firstCtx, chromedp.Evaluate("window.location.href", &firstUrl))
+	firstCancel()
+	_ = firstUrl
+
+	ticker := time.NewTicker(1 * time.Second) // Проверяем каждую секунду для более частого поддержания связи
 	defer ticker.Stop()
 
 	for {
