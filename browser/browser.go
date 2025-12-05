@@ -133,7 +133,7 @@ func (b *Browser) Navigate(url string) error {
 	// Создание нового контекста с таймаутом может привести к преждевременной отмене
 	// Вместо этого используем основной контекст напрямую
 	// Keep-alive механизм уже работает и поддерживает контекст активным
-	
+
 	err := chromedp.Run(b.ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
@@ -381,7 +381,7 @@ func (b *Browser) keepAliveLoop() {
 	firstCancel()
 	_ = firstUrl
 
-	ticker := time.NewTicker(1 * time.Second) // Проверяем каждую секунду для более частого поддержания связи
+	ticker := time.NewTicker(1 * time.Minute) // Проверяем каждую минуту
 	defer ticker.Stop()
 
 	for {
