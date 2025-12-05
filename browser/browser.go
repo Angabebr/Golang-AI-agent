@@ -34,11 +34,20 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
 		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
 		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
+		// Флаги для предотвращения автоматического закрытия
+		chromedp.Flag("remote-debugging-port", "0"),           // Отключить remote debugging (может вызывать проблемы)
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
-		// Логирование можно включить при необходимости
+		// Фильтруем некритичные ошибки парсинга событий
+		msg := fmt.Sprintf(format, v...)
+		if !contains(msg, "could not unmarshal event") &&
+		   !contains(msg, "parse error") &&
+		   !contains(msg, "unknown IPAddressSpace") {
+			// Логируем только важные сообщения
+			// Можно включить полное логирование при необходимости
+		}
 	}))
 
 	b := &Browser{
@@ -73,6 +82,7 @@ func (b *Browser) Navigate(url string) error {
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
+		chromedp.Sleep(1*time.Second), // Даем время странице полностью загрузиться
 	)
 	
 	if err != nil {
@@ -82,7 +92,7 @@ func (b *Browser) Navigate(url string) error {
 		if errStr == "invalid context" || err == context.Canceled {
 			// Создаем новый контекст браузера
 			newCtx, newCancel := chromedp.NewContext(b.allocCtx)
-			defer newCancel()
+			// НЕ используем defer newCancel() - контекст должен остаться живым
 			
 			// Обновляем контекст браузера в структуре
 			b.ctx = newCtx
@@ -95,12 +105,30 @@ func (b *Browser) Navigate(url string) error {
 			return chromedp.Run(ctx2,
 				chromedp.Navigate(url),
 				chromedp.WaitVisible("body", chromedp.ByQuery),
+				chromedp.Sleep(1*time.Second),
 			)
 		}
 		return fmt.Errorf("failed to navigate to %s: %w", url, err)
 	}
 	
 	return nil
+}
+
+// contains проверяет, содержит ли строка подстроку
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && 
+		(s == substr || 
+		 (len(s) > len(substr) && 
+		  findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // GetPageContent извлекает структурированную информацию о странице
