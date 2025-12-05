@@ -29,17 +29,20 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.UserDataDir(userDataDir),
 		chromedp.WindowSize(1920, 1080),
 		// Флаги для пропуска окна выбора профиля
-		chromedp.Flag("no-first-run", true),             // Пропустить первый запуск
-		chromedp.Flag("no-default-browser-check", true), // Не проверять браузер по умолчанию
-		chromedp.Flag("disable-default-apps", true),     // Отключить приложения по умолчанию
-		chromedp.Flag("disable-infobars", true),         // Отключить информационные панели
-		chromedp.Flag("disable-popup-blocking", true),   // Отключить блокировку всплывающих окон
-		chromedp.Flag("profile-directory", "Default"),   // Использовать профиль Default
-		chromedp.Flag("disable-extensions", false),      // Можно оставить расширения, если нужно
+		chromedp.Flag("no-first-run", true),                    // Пропустить первый запуск
+		chromedp.Flag("no-default-browser-check", true),        // Не проверять браузер по умолчанию
+		chromedp.Flag("disable-default-apps", true),            // Отключить приложения по умолчанию
+		chromedp.Flag("disable-infobars", true),                // Отключить информационные панели
+		chromedp.Flag("disable-popup-blocking", true),          // Отключить блокировку всплывающих окон
+		chromedp.Flag("profile-directory", "Default"),         // Использовать профиль Default
+		chromedp.Flag("disable-extensions", false),            // Можно оставить расширения, если нужно
 		// Флаги для предотвращения автоматического закрытия
 		chromedp.Flag("disable-background-networking", true),       // Отключить фоновые сетевые запросы
 		chromedp.Flag("disable-background-timer-throttling", true), // Отключить throttling таймеров
-		chromedp.Flag("disable-renderer-backgrounding", true),      // Отключить фоновый рендеринг
+		chromedp.Flag("disable-renderer-backgrounding", true),     // Отключить фоновый рендеринг
+		// Флаги для предотвращения открытия нескольких окон
+		chromedp.Flag("single-process", false),                    // НЕ использовать single-process (может вызвать проблемы)
+		chromedp.Flag("disable-features", "VizDisplayCompositor"), // Отключить некоторые функции для стабильности
 	)
 
 	// Создаем контекст, который не будет отменен автоматически
@@ -51,7 +54,7 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		// Фильтруем несущественные сообщения chromedp
 		// Эти ошибки связаны с парсингом событий DevTools Protocol и не влияют на функциональность
 		msg := fmt.Sprintf(format, v...)
-		
+
 		// Список паттернов для фильтрации несущественных ошибок
 		ignorePatterns := []string{
 			"could not unmarshal event",
@@ -61,7 +64,7 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 			"parse error",
 			"cookiePart",
 		}
-		
+
 		// Проверяем, содержит ли сообщение игнорируемые паттерны
 		shouldIgnore := false
 		for _, pattern := range ignorePatterns {
@@ -70,7 +73,7 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 				break
 			}
 		}
-		
+
 		// Выводим только важные сообщения
 		if !shouldIgnore {
 			// Можно включить логирование, если нужно для отладки
@@ -93,16 +96,21 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	// Инициализируем браузер - открываем пустую страницу для проверки
 	// Используем контекст браузера напрямую с таймаутом для операции инициализации
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer initCancel() // Отменяем только контекст операции, не основной контекст браузера
-
+	
 	// Простая инициализация - открываем about:blank
 	if err := chromedp.Run(initCtx,
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
+		initCancel()
 		keepAliveCancel()
-		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
+		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n- Директория браузера занята другим процессом\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
+	
+	// НЕ отменяем initCancel сразу - даем браузеру время инициализироваться
+	// Отменяем только после небольшой задержки
+	time.Sleep(1 * time.Second)
+	initCancel()
 
 	// Запускаем keep-alive механизм СРАЗУ после инициализации
 	// Это гарантирует, что контекст остается активным с самого начала
@@ -110,7 +118,7 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 
 	// Ждем, чтобы браузер полностью инициализировался
 	// Основной контекст браузера (ctx) остается активным и не отменяется
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	return b, nil
 }
