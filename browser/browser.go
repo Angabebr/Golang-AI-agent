@@ -37,16 +37,9 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	)
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
-		// Фильтруем некритичные ошибки парсинга событий
-		msg := fmt.Sprintf(format, v...)
-		if !contains(msg, "could not unmarshal event") &&
-		   !contains(msg, "parse error") &&
-		   !contains(msg, "unknown IPAddressSpace") {
-			// Логируем только важные сообщения
-			// Можно включить полное логирование при необходимости
-		}
-	}))
+	// Отключаем логирование chromedp полностью - ошибки парсинга не критичны
+	// Они связаны с парсингом событий DevTools Protocol, но не влияют на функциональность
+	ctx, cancel := chromedp.NewContext(allocCtx)
 
 	b := &Browser{
 		ctx:         ctx,

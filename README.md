@@ -58,9 +58,17 @@ go build -o bin/golang-ai-agent .
 # Windows
 bin\golang-ai-agent.exe
 
+# Или с фильтрацией некритичных ошибок:
+bin\golang-ai-agent.exe 2>nul
+
 # Linux/Mac
 ./bin/golang-ai-agent
+
+# Или с фильтрацией:
+./bin/golang-ai-agent 2>/dev/null
 ```
+
+**Примечание:** При запуске могут появляться ошибки парсинга событий chromedp (например, "could not unmarshal event"). Эти ошибки **не критичны** и не влияют на работу агента - они связаны с парсингом событий Chrome DevTools Protocol. Можно игнорировать их или перенаправить stderr при запуске.
 
 Агент откроет браузер и будет ждать ваших команд в терминале.
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -21,7 +22,32 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// ErrorFilterWriter фильтрует некритичные ошибки chromedp
+type ErrorFilterWriter struct {
+	original io.Writer
+}
+
+func (w *ErrorFilterWriter) Write(p []byte) (n int, err error) {
+	msg := string(p)
+	// Фильтруем некритичные ошибки парсинга событий
+	if strings.Contains(msg, "ERROR: could not unmarshal event") ||
+		strings.Contains(msg, "parse error: expected string") ||
+		strings.Contains(msg, "unknown IPAddressSpace value: Loopback") {
+		// Пропускаем эти ошибки - они не критичны
+		return len(p), nil
+	}
+	// Выводим все остальное
+	return w.original.Write(p)
+}
+
 func main() {
+	// Примечание: chromedp может выводить ошибки парсинга событий в stderr
+	// Эти ошибки ("could not unmarshal event", "unknown IPAddressSpace") не критичны
+	// и не влияют на функциональность - они связаны с парсингом DevTools Protocol
+	// Можно игнорировать их или фильтровать через перенаправление stderr при запуске:
+	// .\Golang-AI-agent.exe 2>nul  (Windows)
+	// ./golang-ai-agent 2>/dev/null  (Linux/Mac)
+
 	// Загружаем переменные окружения
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found or error loading: %v", err)
