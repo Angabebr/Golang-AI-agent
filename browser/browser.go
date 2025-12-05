@@ -40,10 +40,20 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 		chromedp.Flag("disable-renderer-backgrounding", true),  // Отключить фоновый рендеринг
 	)
 
+	// Создаем контекст, который не будет отменен автоматически
+	// Используем context.Background() для allocCtx, чтобы он не был отменен
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	// Отключаем логирование chromedp полностью - ошибки парсинга не критичны
 	// Они связаны с парсингом событий DevTools Protocol, но не влияют на функциональность
-	ctx, cancel := chromedp.NewContext(allocCtx)
+	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(func(format string, v ...interface{}) {
+		// Фильтруем несущественные сообщения
+		msg := fmt.Sprintf(format, v...)
+		if !contains(msg, "could not unmarshal event") && 
+		   !contains(msg, "unexpected end of JSON input") {
+			// Можно включить логирование, если нужно
+			// fmt.Printf("[chromedp] %s\n", msg)
+		}
+	}))
 
 	b := &Browser{
 		ctx:         ctx,
@@ -53,34 +63,29 @@ func NewBrowser(userDataDir string, headless bool) (*Browser, error) {
 	}
 
 	// Инициализируем браузер - открываем пустую страницу для проверки
-	// Используем контекст браузера напрямую, НЕ создаем новый с таймаутом
-	// Таймаут может вызвать преждевременное закрытие браузера
+	// Используем контекст браузера напрямую с таймаутом для операции инициализации
 	initCtx, initCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer initCancel() // Отменяем только контекст операции, не основной контекст браузера
 	
 	// Простая инициализация - открываем about:blank
 	if err := chromedp.Run(initCtx, 
 		chromedp.Navigate("about:blank"),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 	); err != nil {
-		initCancel()
 		return nil, fmt.Errorf("failed to start browser: %w\n\nВозможные причины:\n- Chrome/Chromium не установлен\n- Chrome заблокирован антивирусом\n- Недостаточно прав для запуска\n\nУстановите Chrome или Chromium: https://www.google.com/chrome/", err)
 	}
 	
-	// НЕ отменяем initCancel сразу - даем браузеру время инициализироваться
-	// Отменяем только после небольшой задержки
-	time.Sleep(1 * time.Second)
-	initCancel()
+	// Ждем, чтобы браузер полностью инициализировался
+	// Основной контекст браузера (ctx) остается активным и не отменяется
+	time.Sleep(2 * time.Second)
 
 	return b, nil
 }
 
 // Navigate переходит на указанный URL
 func (b *Browser) Navigate(url string) error {
-	// Используем контекст браузера напрямую БЕЗ таймаута для операции навигации
-	// Таймаут может вызвать преждевременное закрытие браузера
-	// Используем контекст браузера напрямую
-
-	// Создаем таймаут только для операции, но не отменяем основной контекст
+	// Используем контекст браузера напрямую с таймаутом для операции
+	// Основной контекст браузера (b.ctx) остается активным и не отменяется
 	ctx, cancel := context.WithTimeout(b.ctx, 30*time.Second)
 	defer cancel()
 
