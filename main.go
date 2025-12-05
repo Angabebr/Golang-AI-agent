@@ -117,6 +117,9 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	enableSecurity := os.Getenv("ENABLE_SECURITY_LAYER")
 	securityEnabled := enableSecurity != "false"
 
+	// Опция: оставить браузер открытым после завершения программы
+	keepBrowserOpen := os.Getenv("KEEP_BROWSER_OPEN") == "true"
+
 	// Создаем компоненты
 	fmt.Println("🚀 Инициализация AI-агента...")
 	fmt.Printf("📁 Директория браузера: %s\n", userDataDir)
@@ -127,10 +130,13 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	if err != nil {
 		log.Fatalf("\n❌ Не удалось запустить браузер: %v\n\nУбедитесь, что Chrome/Chromium установлен и доступен.", err)
 	}
-	
-	// Опция: оставить браузер открытым после завершения программы
-	// Если нужно, чтобы браузер оставался открытым, закомментируйте следующую строку:
-	defer browserInstance.Close()
+
+	// Закрываем браузер при завершении программы (если не указано иное)
+	if !keepBrowserOpen {
+		defer browserInstance.Close()
+	} else {
+		fmt.Println("ℹ️  Браузер останется открытым после завершения программы")
+	}
 
 	fmt.Println("✅ Браузер запущен")
 
@@ -197,7 +203,12 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 	go func() {
 		<-sigChan
 		fmt.Println("\n\n🛑 Получен сигнал завершения...")
-		browserInstance.Close()
+		if !keepBrowserOpen {
+			fmt.Println("   Браузер будет закрыт...")
+			browserInstance.Close()
+		} else {
+			fmt.Println("   Браузер останется открытым")
+		}
 		os.Exit(0)
 	}()
 
@@ -216,8 +227,12 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		taskLower := strings.ToLower(task)
 		if taskLower == "exit" || taskLower == "quit" || taskLower == "выход" {
 			fmt.Println("👋 До свидания!")
-			fmt.Println("   Браузер будет закрыт...")
-			// defer browserInstance.Close() закроет браузер автоматически
+			if !keepBrowserOpen {
+				fmt.Println("   Браузер будет закрыт...")
+			} else {
+				fmt.Println("   Браузер останется открытым")
+			}
+			// defer browserInstance.Close() закроет браузер автоматически (если keepBrowserOpen = false)
 			break
 		}
 
