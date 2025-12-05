@@ -23,6 +23,41 @@ $content = $content.TrimStart([char]0xFEFF)
 2. Скопируйте `.env.example` в `.env`
 3. Добавьте ваш API ключ
 
+## Проблема: "Не удалось создать каталог данных" / "cannot perform read and write operations"
+
+### Решение:
+Эта ошибка означает, что Chrome не может получить доступ к директории `browser_data`.
+
+**Автоматическое исправление (встроено в код):**
+- Код теперь автоматически создает директорию
+- Проверяет права на запись
+- Использует абсолютный путь
+
+**Если проблема сохраняется:**
+
+1. **Проверьте права доступа:**
+   ```powershell
+   # Windows - проверьте права на папку
+   icacls browser_data
+   ```
+
+2. **Удалите и пересоздайте директорию:**
+   ```powershell
+   # Windows
+   Remove-Item -Recurse -Force browser_data -ErrorAction SilentlyContinue
+   New-Item -ItemType Directory -Path browser_data
+   ```
+
+3. **Используйте другую директорию:**
+   В `.env` файле укажите абсолютный путь:
+   ```env
+   BROWSER_USER_DATA_DIR=C:\Users\YourName\browser_data
+   ```
+
+4. **Проверьте антивирус:**
+   - Некоторые антивирусы блокируют создание директорий
+   - Добавьте исключение для вашего проекта
+
 ## Проблема: "failed to start browser" / "chrome failed to start"
 
 ### Решение:

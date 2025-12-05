@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -56,11 +57,33 @@ export OPENAI_API_KEY=your_api_key_here (Linux/Mac)
 		userDataDir = "./browser_data"
 	}
 
+	// Преобразуем относительный путь в абсолютный
+	if !filepath.IsAbs(userDataDir) {
+		absPath, err := filepath.Abs(userDataDir)
+		if err != nil {
+			log.Fatalf("Не удалось получить абсолютный путь для browser_data: %v", err)
+		}
+		userDataDir = absPath
+	}
+
+	// Создаем директорию browser_data если её нет
+	if err := os.MkdirAll(userDataDir, 0755); err != nil {
+		log.Fatalf("Не удалось создать директорию browser_data (%s): %v\n\nПроверьте права доступа к директории.", userDataDir, err)
+	}
+
+	// Проверяем права на запись
+	testFile := filepath.Join(userDataDir, ".test_write")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		log.Fatalf("Нет прав на запись в директорию browser_data (%s): %v\n\nПроверьте права доступа.", userDataDir, err)
+	}
+	os.Remove(testFile) // Удаляем тестовый файл
+
 	enableSecurity := os.Getenv("ENABLE_SECURITY_LAYER")
 	securityEnabled := enableSecurity != "false"
 
 	// Создаем компоненты
 	fmt.Println("🚀 Инициализация AI-агента...")
+	fmt.Printf("📁 Директория браузера: %s\n", userDataDir)
 
 	// Создаем браузер (не headless, чтобы видеть процесс)
 	fmt.Println("🌐 Запуск браузера...")
