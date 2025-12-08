@@ -46,6 +46,9 @@ type Decision struct {
 	Text        string            `json:"text,omitempty"`
 	Value       string            `json:"value,omitempty"`
 	URL         string            `json:"url,omitempty"`
+	Key         string            `json:"key,omitempty"`         // Клавиша для нажатия (delete, enter, escape)
+	TabID       string            `json:"tab_id,omitempty"`      // ID вкладки для переключения/закрытия
+	TabIndex    int               `json:"tab_index,omitempty"`   // Индекс вкладки (1, 2, 3...)
 	WaitFor     string            `json:"wait_for,omitempty"`
 	NeedsInput  bool              `json:"needs_input"`
 	InputPrompt string            `json:"input_prompt,omitempty"`
@@ -71,6 +74,8 @@ func (c *Client) MakeDecision(ctx context.Context, task string, pageContent inte
    
 2. click - кликнуть на элемент
    - ОБЯЗАТЕЛЬНО заполни: "text" (видимый текст из списка buttons или links)
+   - Доступна дополнительная информация о кнопках: aria-label, title, action, контекст, id, class
+   - Используй эту информацию, чтобы лучше понять назначение кнопки
    - Или если text не работает: "selector" (CSS селектор)
    
 3. fill - заполнить поле ввода
@@ -79,18 +84,38 @@ func (c *Client) MakeDecision(ctx context.Context, task string, pageContent inte
    - Для полей поиска можно использовать общие термины: "искать", "search", "поиск"
    - Или если text не работает: "selector" (CSS селектор) + "value"
    
-4. wait - подождать
+4. press_key - нажать клавишу на клавиатуре
+   - ОБЯЗАТЕЛЬНО заполни: "key" (название клавиши)
+   - Доступные клавиши: "delete", "enter", "escape", "backspace", "tab", "space", "up", "down", "left", "right", "pageup", "pagedown", "home", "end"
+   - Примеры использования:
+     * Удалить письмо: сначала кликни на письмо, затем нажми "delete"
+     * Отправить форму: нажми "enter"
+     * Закрыть диалог: нажми "escape"
+   
+5. switch_tab - переключиться на другую вкладку
+   - ОБЯЗАТЕЛЬНО заполни: "tab_index" (номер вкладки из списка "Открытые вкладки браузера", например 1, 2, 3)
+   - Используй когда нужно переключиться между открытыми вкладками
+   - Пример: {"action": "switch_tab", "tab_index": 2}
+   
+6. close_tab - закрыть вкладку
+   - ОБЯЗАТЕЛЬНО заполни: "tab_index" (номер вкладки из списка "Открытые вкладки браузера")
+   - Используй для закрытия ненужных вкладок
+   - НЕ закрывай активную вкладку, если это последняя вкладка
+   
+7. wait - подождать
    - Опционально: "wait_for" (селектор элемента)
    
-5. extract - извлечь информацию (уже сделано автоматически)
-6. complete - задача выполнена ТОЛЬКО когда задача действительно выполнена
+8. extract - извлечь информацию (уже сделано автоматически)
+9. complete - задача выполнена ТОЛЬКО когда задача действительно выполнена
 
 КРИТИЧЕСКИ ВАЖНО - ПРАВИЛА ЗАПОЛНЕНИЯ ПОЛЕЙ:
 - Для действия "navigate": Можешь использовать URL из списка links ИЛИ указать прямой URL (например, "https://mail.ru", "https://e.mail.ru")
 - Для действия "click": ВСЕГДА заполняй "text" из списка buttons/links
 - Для действия "fill": ВСЕГДА заполняй "text" (из inputs.placeholder, inputs.name, inputs.aria-label) И "value"
+- Для действия "press_key": ВСЕГДА заполняй "key" (название клавиши: "delete", "enter", "escape" и т.д.)
 - Для полей поиска можно использовать общие термины: "искать", "search", "поиск" - система найдет поле автоматически
 - НЕ завершай задачу (complete) если просто не можешь найти ссылку - используй navigate с прямым URL
+- Для удаления писем можно использовать press_key с "delete" после выбора письма
 - НЕ используй заготовленные селекторы - анализируй ТОЛЬКО данные текущей страницы
 - Отвечай ТОЛЬКО в формате JSON, без дополнительного текста до или после JSON
 
@@ -298,7 +323,33 @@ func (c *Client) buildPrompt(task string, pageContent interface{}, history []str
 		if len(quickInfo.Buttons) > 0 {
 			sb.WriteString("\nДоступные кнопки:\n")
 			for _, btn := range quickInfo.Buttons {
-				sb.WriteString(fmt.Sprintf("  - %s\n", btn))
+				// Основная информация о кнопке
+				btnInfo := fmt.Sprintf("  - Текст: '%s'", btn.Text)
+				
+				// Добавляем дополнительную информацию, если она есть
+				var details []string
+				
+				if btn.AriaLabel != "" && btn.AriaLabel != btn.Text {
+					details = append(details, fmt.Sprintf("aria-label='%s'", btn.AriaLabel))
+				}
+				if btn.Title != "" && btn.Title != btn.Text {
+					details = append(details, fmt.Sprintf("title='%s'", btn.Title))
+				}
+				if btn.DataAction != "" {
+					details = append(details, fmt.Sprintf("action='%s'", btn.DataAction))
+				}
+				if btn.Context != "" {
+					details = append(details, fmt.Sprintf("в %s", btn.Context))
+				}
+				if btn.ID != "" {
+					details = append(details, fmt.Sprintf("id='%s'", btn.ID))
+				}
+				
+				if len(details) > 0 {
+					btnInfo += " [" + strings.Join(details, ", ") + "]"
+				}
+				
+				sb.WriteString(btnInfo + "\n")
 			}
 		}
 	} else if pc, ok := pageContent.(*browser.PageContent); ok {
@@ -315,7 +366,63 @@ func (c *Client) buildPrompt(task string, pageContent interface{}, history []str
 		if len(pc.Buttons) > 0 {
 			sb.WriteString("\nДоступные кнопки:\n")
 			for _, btn := range pc.Buttons {
-				sb.WriteString(fmt.Sprintf("  - %s\n", btn.Text))
+				// Основная информация о кнопке
+				btnInfo := fmt.Sprintf("  - Текст: '%s'", btn.Text)
+				
+				// Добавляем дополнительную информацию, если она есть
+				var details []string
+				
+				if btn.AriaLabel != "" && btn.AriaLabel != btn.Text {
+					details = append(details, fmt.Sprintf("aria-label='%s'", btn.AriaLabel))
+				}
+				if btn.Title != "" && btn.Title != btn.Text {
+					details = append(details, fmt.Sprintf("title='%s'", btn.Title))
+				}
+				if btn.DataAction != "" {
+					details = append(details, fmt.Sprintf("action='%s'", btn.DataAction))
+				}
+				if btn.Context != "" {
+					details = append(details, fmt.Sprintf("в %s", btn.Context))
+				}
+				if btn.ID != "" {
+					details = append(details, fmt.Sprintf("id='%s'", btn.ID))
+				}
+				// Показываем классы только если они содержат важную информацию
+				if btn.Class != "" {
+					lowerClass := strings.ToLower(btn.Class)
+					if strings.Contains(lowerClass, "add") || 
+					   strings.Contains(lowerClass, "cart") || 
+					   strings.Contains(lowerClass, "buy") ||
+					   strings.Contains(lowerClass, "submit") ||
+					   strings.Contains(lowerClass, "confirm") ||
+					   strings.Contains(lowerClass, "delete") ||
+					   strings.Contains(lowerClass, "remove") {
+						// Извлекаем только важные классы
+						classes := strings.Fields(btn.Class)
+						var importantClasses []string
+						for _, cls := range classes {
+							clsLower := strings.ToLower(cls)
+							if strings.Contains(clsLower, "add") || 
+							   strings.Contains(clsLower, "cart") || 
+							   strings.Contains(clsLower, "buy") ||
+							   strings.Contains(clsLower, "submit") ||
+							   strings.Contains(clsLower, "confirm") ||
+							   strings.Contains(clsLower, "delete") ||
+							   strings.Contains(clsLower, "remove") {
+								importantClasses = append(importantClasses, cls)
+							}
+						}
+						if len(importantClasses) > 0 {
+							details = append(details, fmt.Sprintf("class='%s'", strings.Join(importantClasses, " ")))
+						}
+					}
+				}
+				
+				if len(details) > 0 {
+					btnInfo += " [" + strings.Join(details, ", ") + "]"
+				}
+				
+				sb.WriteString(btnInfo + "\n")
 			}
 		}
 		
@@ -387,6 +494,18 @@ func (c *Client) buildPrompt(task string, pageContent interface{}, history []str
 					rowStr := strings.Join(row, " | ")
 					sb.WriteString(fmt.Sprintf("  %s\n", rowStr))
 				}
+			}
+		}
+		
+		// Информация о вкладках браузера
+		if len(pc.Tabs) > 0 {
+			sb.WriteString("\nОткрытые вкладки браузера:\n")
+			for i, tab := range pc.Tabs {
+				activeMarker := ""
+				if tab.IsActive {
+					activeMarker = " [АКТИВНАЯ]"
+				}
+				sb.WriteString(fmt.Sprintf("  %d. %s - %s%s\n", i+1, tab.Title, tab.URL, activeMarker))
 			}
 		}
 	} else {

@@ -267,6 +267,58 @@ func (a *Agent) executeAction(ctx context.Context, decision *ai.Decision) error 
 		}
 		return fmt.Errorf("не указан селектор или placeholder для заполнения. Используй поле 'text' с placeholder/name из списка inputs, или поле 'selector' с CSS селектором")
 
+	case "press_key":
+		if decision.Key == "" {
+			return fmt.Errorf("не указана клавиша для нажатия (key пустое). Используй поле 'key' с названием клавиши (delete, enter, escape и т.д.)")
+		}
+		fmt.Printf("⌨️  Нажатие клавиши: %s\n", decision.Key)
+		return a.browser.PressKey(decision.Key)
+
+	case "switch_tab":
+		if decision.TabIndex <= 0 {
+			return fmt.Errorf("не указан индекс вкладки (tab_index пустое или неверное). Используй поле 'tab_index' с номером вкладки (1, 2, 3...)")
+		}
+		// Получаем список вкладок
+		tabs, err := a.browser.GetAllTabs()
+		if err != nil {
+			return fmt.Errorf("не удалось получить список вкладок: %w", err)
+		}
+		if decision.TabIndex > len(tabs) {
+			return fmt.Errorf("неверный индекс вкладки: %d (всего вкладок: %d)", decision.TabIndex, len(tabs))
+		}
+		targetTab := tabs[decision.TabIndex-1]
+		fmt.Printf("🔄 Переключение на вкладку %d: %s\n", decision.TabIndex, targetTab.Title)
+		return a.browser.SwitchToTab(targetTab.ID)
+
+	case "close_tab":
+		if decision.TabIndex <= 0 {
+			return fmt.Errorf("не указан индекс вкладки (tab_index пустое или неверное). Используй поле 'tab_index' с номером вкладки (1, 2, 3...)")
+		}
+		// Получаем список вкладок
+		tabs, err := a.browser.GetAllTabs()
+		if err != nil {
+			return fmt.Errorf("не удалось получить список вкладок: %w", err)
+		}
+		if decision.TabIndex > len(tabs) {
+			return fmt.Errorf("неверный индекс вкладки: %d (всего вкладок: %d)", decision.TabIndex, len(tabs))
+		}
+		if len(tabs) == 1 {
+			return fmt.Errorf("нельзя закрыть единственную открытую вкладку")
+		}
+		targetTab := tabs[decision.TabIndex-1]
+		if targetTab.IsActive {
+			// Если закрываем активную вкладку, сначала переключимся на другую
+			newActiveIndex := 0
+			if decision.TabIndex == 1 {
+				newActiveIndex = 1 // переключимся на следующую
+			}
+			if err := a.browser.SwitchToTab(tabs[newActiveIndex].ID); err != nil {
+				return fmt.Errorf("не удалось переключиться перед закрытием: %w", err)
+			}
+		}
+		fmt.Printf("❌ Закрытие вкладки %d: %s\n", decision.TabIndex, targetTab.Title)
+		return a.browser.CloseTab(targetTab.ID)
+
 	case "wait":
 		if decision.WaitFor != "" {
 			fmt.Printf("⏳ Ожидание элемента: %s\n", decision.WaitFor)

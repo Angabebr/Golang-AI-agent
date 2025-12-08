@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/input"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 )
 
@@ -156,16 +158,17 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 		ctx, cancel := context.WithTimeout(b.ctx, 45*time.Second)
 		
 		// Сначала прокручиваем страницу и ждем загрузки динамического контента
-		_ = chromedp.Run(ctx,
-			chromedp.Sleep(2*time.Second), // Ждем загрузки динамического контента
+		_ = 		chromedp.Run(ctx,
+			chromedp.Sleep(1*time.Second), // Ждем загрузки динамического контента
+			// Минимальный скроллинг только для загрузки ленивого контента
 			chromedp.Evaluate(`
-				// Прокручиваем страницу вниз для загрузки всех элементов
-				window.scrollTo(0, 0);
-				setTimeout(() => window.scrollTo(0, document.body.scrollHeight / 2), 100);
-				setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 200);
-				setTimeout(() => window.scrollTo(0, 0), 300);
+				if (document.body.scrollHeight > window.innerHeight * 2) {
+					// Только если страница длинная - немного прокручиваем
+					window.scrollTo(0, window.innerHeight);
+					setTimeout(() => window.scrollTo(0, 0), 200);
+				}
 			`, nil),
-			chromedp.Sleep(1*time.Second), // Ждем после прокрутки
+			chromedp.Sleep(500*time.Millisecond),
 		)
 		
 		err = chromedp.Run(ctx,
@@ -200,7 +203,7 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 			const textPreview = bodyText.length > 5000 ? bodyText.substring(0, 5000) + '...' : bodyText;
 			
 			// Извлечение структурированных данных - УВЕЛИЧИВАЕМ лимиты
-			const links = Array.from(document.querySelectorAll('a')).slice(0, 200).map(a => {
+			let links = Array.from(document.querySelectorAll('a')).slice(0, 200).map(a => {
 				const text = (a.innerText || a.textContent || '').trim();
 				const href = a.href;
 				const visible = isVisible(a);
@@ -244,19 +247,78 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 				return text;
 			}
 			
-			const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], a.button, .btn, [class*="button"], [class*="add"], [class*="cart"]')).slice(0, 200).map(b => {
+			let buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], a.button, .btn, [class*="button"], [class*="add"], [class*="cart"]')).slice(0, 200).map(b => {
 				const text = getButtonText(b);
 				const visible = isVisible(b);
 				const enabled = !b.disabled && !b.hasAttribute('disabled');
 				const tag = b.tagName.toLowerCase();
 				const role = b.getAttribute('role') || '';
-				// Включаем кнопки даже без текста, если они имеют специальные классы/ID
+				const ariaLabel = b.getAttribute('aria-label') || '';
+				const title = b.getAttribute('title') || '';
 				const classNameStr = typeof b.className === 'string' ? b.className : (b.className ? b.className.toString() : '');
+				const id = b.id || '';
+				
+				// Собираем data-атрибуты
+				let dataAction = '';
+				const dataAttrs = ['data-action', 'data-testid', 'data-qa', 'data-id', 'data-test'];
+				for (const attr of dataAttrs) {
+					const val = b.getAttribute(attr);
+					if (val) {
+						dataAction = val;
+						break;
+					}
+				}
+				
+				// Определяем контекст (где находится кнопка)
+				let context = '';
+				let parent = b.parentElement;
+				let depth = 0;
+				while (parent && depth < 5) {
+					const parentTag = parent.tagName.toLowerCase();
+					if (['header', 'footer', 'nav', 'aside', 'form', 'dialog', 'modal'].includes(parentTag)) {
+						context = parentTag;
+						break;
+					}
+					const parentClass = (typeof parent.className === 'string' ? parent.className : '').toLowerCase();
+					if (parentClass.includes('header')) context = 'header';
+					else if (parentClass.includes('footer')) context = 'footer';
+					else if (parentClass.includes('nav')) context = 'nav';
+					else if (parentClass.includes('modal') || parentClass.includes('dialog')) context = 'modal';
+					else if (parentClass.includes('cart') || parentClass.includes('basket')) context = 'cart';
+					else if (parentClass.includes('card') || parentClass.includes('item') || parentClass.includes('product')) context = 'item';
+					if (context) break;
+					parent = parent.parentElement;
+					depth++;
+				}
+				
+				// Получаем onclick (если есть), но обрезаем до 50 символов
+				let onclick = '';
+				if (b.onclick) {
+					onclick = b.onclick.toString().substring(0, 50);
+				} else if (b.getAttribute('onclick')) {
+					onclick = b.getAttribute('onclick').substring(0, 50);
+				}
+				
+				// Включаем кнопки даже без текста, если они имеют специальные классы/ID
 				const hasSpecialClass = classNameStr.toLowerCase().includes('add') || 
 				                       classNameStr.toLowerCase().includes('cart') ||
-				                       (b.id || '').toLowerCase().includes('add') ||
-				                       (b.id || '').toLowerCase().includes('cart');
-				return { text: text || (hasSpecialClass ? '+' : ''), type: tag, visible, enabled, role };
+				                       id.toLowerCase().includes('add') ||
+				                       id.toLowerCase().includes('cart');
+				
+				return { 
+					text: text || (hasSpecialClass ? '+' : ''), 
+					type: tag, 
+					visible, 
+					enabled, 
+					role,
+					aria_label: ariaLabel,
+					title: title,
+					class: classNameStr.substring(0, 100), // обрезаем длинные классы
+					id: id,
+					data_action: dataAction,
+					context: context,
+					onclick: onclick
+				};
 			}).filter(b => b.visible && b.enabled && (b.text || b.text === '+')); // Разрешаем кнопки с "+"
 			
 			const inputs = Array.from(document.querySelectorAll('input, textarea, select')).slice(0, 25).map(i => {
@@ -295,33 +357,66 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 			
 			// Извлечение элементов списка писем (специально для почтовых сервисов)
 			const emailItems = [];
-			// Ищем контейнеры со списками писем
-			const emailContainers = document.querySelectorAll('[class*="mail"], [class*="message"], [class*="letter"], [class*="email"], [id*="mail"], [id*="message"]');
+			// Ищем контейнеры со списками писем - расширенный список селекторов
+			const emailContainers = document.querySelectorAll('[class*="mail"], [class*="message"], [class*="letter"], [class*="email"], [id*="mail"], [id*="message"], [class*="inbox"], [class*="dataset"]');
 			emailContainers.forEach(container => {
-				const items = Array.from(container.querySelectorAll('a, div, li, tr')).slice(0, 30);
+				const items = Array.from(container.querySelectorAll('a, div[role="link"], div[data-id], li[data-id], tr[data-id]')).slice(0, 50);
 				items.forEach(item => {
+					// Проверяем, что это не вложенный элемент уже добавленного письма
+					if (item.closest && emailItems.some(ei => ei.element && ei.element.contains(item))) {
+						return;
+					}
+					
 					const text = (item.innerText || item.textContent || '').trim();
 					const href = item.href || '';
-					if (text && text.length > 5 && text.length < 200) {
+					
+					// Фильтруем: текст должен быть достаточно длинным, но не слишком
+					// Также проверяем наличие data-атрибутов для кликабельных элементов
+					const hasDataId = item.hasAttribute('data-id') || item.hasAttribute('data-item-id') || item.hasAttribute('data-key');
+					const isClickable = href || hasDataId || item.hasAttribute('role');
+					
+					if (text && text.length > 5 && text.length < 300 && isClickable) {
 						emailItems.push({
-							text: text,
+							text: text.substring(0, 200), // обрезаем длинный текст
 							href: href,
-							tag: item.tagName.toLowerCase()
+							tag: item.tagName.toLowerCase(),
+							dataId: item.getAttribute('data-id') || item.getAttribute('data-item-id') || '',
+							element: item
 						});
 					}
 				});
 			});
 			
-			// Если нашли элементы писем, добавляем их в links
+			// Если нашли элементы писем, добавляем их В НАЧАЛО списка (высокий приоритет)
 			if (emailItems.length > 0) {
+				const emailLinks = [];
+				const emailButtons = [];
+				
 				emailItems.forEach(item => {
 					if (item.href) {
-						links.push({ text: item.text, href: item.href, visible: true });
+						emailLinks.push({ text: item.text, href: item.href, visible: true });
 					} else {
-						// Если нет href, добавляем как кнопку
-						buttons.push({ text: item.text, type: item.tag, visible: true, enabled: true, role: '' });
+						// Если нет href, добавляем как кнопку с полной информацией
+						emailButtons.push({ 
+							text: item.text, 
+							type: item.tag, 
+							visible: true, 
+							enabled: true, 
+							role: 'link',
+							aria_label: 'Письмо: ' + item.text.substring(0, 50),
+							title: item.text,
+							class: 'email-item',
+							id: item.dataId,
+							data_action: 'open-email',
+							context: 'inbox',
+							onclick: ''
+						});
 					}
 				});
+				
+				// Добавляем письма В НАЧАЛО массивов для высокого приоритета
+				links = emailLinks.concat(links);
+				buttons = emailButtons.concat(buttons);
 			}
 			
 			return {
@@ -342,6 +437,12 @@ func (b *Browser) GetPageContent() (*PageContent, error) {
 		cancel()
 		
 		if err == nil {
+			// Получаем информацию о всех вкладках
+			tabs, tabsErr := b.GetAllTabs()
+			if tabsErr == nil {
+				content.Tabs = tabs
+			}
+			// Игнорируем ошибки получения вкладок, они не критичны
 			return &content, nil
 		}
 		
@@ -452,10 +553,8 @@ func (b *Browser) GetQuickPageInfo() (*QuickPageInfo, error) {
 	ctx, cancel := context.WithTimeout(b.ctx, 15*time.Second)
 	defer cancel()
 
-	// Прокручиваем страницу для загрузки элементов
+	// Минимальная задержка для загрузки элементов (без скроллинга)
 	_ = chromedp.Run(ctx,
-		chromedp.Sleep(1*time.Second),
-		chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight / 2);`, nil),
 		chromedp.Sleep(500*time.Millisecond),
 	)
 
@@ -475,7 +574,7 @@ func (b *Browser) GetQuickPageInfo() (*QuickPageInfo, error) {
 			}
 			
 			// Увеличиваем количество ссылок для быстрого метода
-			const links = Array.from(document.querySelectorAll('a')).slice(0, 100).map(a => {
+			let links = Array.from(document.querySelectorAll('a')).slice(0, 100).map(a => {
 				const text = (a.innerText || a.textContent || '').trim();
 				const href = a.href;
 				if (isVisible(a) && text && href) {
@@ -506,14 +605,117 @@ func (b *Browser) GetQuickPageInfo() (*QuickPageInfo, error) {
 				return text;
 			}
 			
-			// Увеличиваем количество кнопок и ищем кнопки с иконками
-			const buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], [class*="add"], [class*="cart"]')).slice(0, 150).map(b => {
+			// Увеличиваем количество кнопок и собираем полную информацию
+			let buttons = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"], [class*="add"], [class*="cart"]')).slice(0, 150).map(b => {
 				const text = getButtonText(b);
-				if (isVisible(b) && !b.disabled && text) {
-					return text;
+				if (!isVisible(b) || b.disabled || !text) {
+					return null;
 				}
-				return null;
+				
+				const tag = b.tagName.toLowerCase();
+				const role = b.getAttribute('role') || '';
+				const ariaLabel = b.getAttribute('aria-label') || '';
+				const title = b.getAttribute('title') || '';
+				const classNameStr = typeof b.className === 'string' ? b.className : (b.className ? b.className.toString() : '');
+				const id = b.id || '';
+				
+				// Собираем data-атрибуты
+				let dataAction = '';
+				const dataAttrs = ['data-action', 'data-testid', 'data-qa', 'data-id'];
+				for (const attr of dataAttrs) {
+					const val = b.getAttribute(attr);
+					if (val) {
+						dataAction = val;
+						break;
+					}
+				}
+				
+				// Определяем контекст (упрощенная версия)
+				let context = '';
+				let parent = b.parentElement;
+				for (let i = 0; i < 3 && parent; i++) {
+					const parentTag = parent.tagName.toLowerCase();
+					if (['header', 'footer', 'nav', 'form'].includes(parentTag)) {
+						context = parentTag;
+						break;
+					}
+					const parentClass = (typeof parent.className === 'string' ? parent.className : '').toLowerCase();
+					if (parentClass.includes('cart') || parentClass.includes('modal')) {
+						context = parentClass.includes('cart') ? 'cart' : 'modal';
+						break;
+					}
+					parent = parent.parentElement;
+				}
+				
+				return { 
+					text: text, 
+					type: tag, 
+					role: role,
+					aria_label: ariaLabel,
+					title: title,
+					class: classNameStr.substring(0, 80),
+					id: id,
+					data_action: dataAction,
+					context: context,
+					onclick: ''
+				};
 			}).filter(b => b !== null);
+			
+			// Извлечение элементов списка писем (специально для почтовых сервисов)
+			const emailItems = [];
+			const emailContainers = document.querySelectorAll('[class*="mail"], [class*="message"], [class*="letter"], [class*="email"], [id*="mail"], [id*="message"], [class*="inbox"], [class*="dataset"]');
+			emailContainers.forEach(container => {
+				const items = Array.from(container.querySelectorAll('a, div[role="link"], div[data-id], li[data-id], tr[data-id]')).slice(0, 50);
+				items.forEach(item => {
+					if (item.closest && emailItems.some(ei => ei.element && ei.element.contains(item))) {
+						return;
+					}
+					
+					const text = (item.innerText || item.textContent || '').trim();
+					const href = item.href || '';
+					const hasDataId = item.hasAttribute('data-id') || item.hasAttribute('data-item-id') || item.hasAttribute('data-key');
+					const isClickable = href || hasDataId || item.hasAttribute('role');
+					
+					if (text && text.length > 5 && text.length < 300 && isClickable && isVisible(item)) {
+						emailItems.push({
+							text: text.substring(0, 200),
+							href: href,
+							tag: item.tagName.toLowerCase(),
+							dataId: item.getAttribute('data-id') || item.getAttribute('data-item-id') || '',
+							element: item
+						});
+					}
+				});
+			});
+			
+			// Добавляем найденные элементы писем В НАЧАЛО (высокий приоритет)
+			if (emailItems.length > 0) {
+				const emailLinks = [];
+				const emailButtons = [];
+				
+				emailItems.forEach(item => {
+					if (item.href) {
+						emailLinks.push({ text: item.text, href: item.href });
+					} else {
+						emailButtons.push({ 
+							text: item.text, 
+							type: item.tag, 
+							role: 'link',
+							aria_label: 'Письмо: ' + item.text.substring(0, 50),
+							title: item.text,
+							class: 'email-item',
+							id: item.dataId,
+							data_action: 'open-email',
+							context: 'inbox',
+							onclick: ''
+						});
+					}
+				});
+				
+				// Добавляем письма В НАЧАЛО для высокого приоритета
+				links = emailLinks.concat(links);
+				buttons = emailButtons.concat(buttons);
+			}
 			
 			return {
 				url: window.location.href,
@@ -536,7 +738,14 @@ type QuickPageInfo struct {
 	URL     string   `json:"url"`
 	Title   string   `json:"title"`
 	Links   []Link   `json:"links"`
-	Buttons []string `json:"buttons"`
+	Buttons []Button `json:"buttons"`
+}
+
+type TabInfo struct {
+	ID       string `json:"id"`        // ID таргета
+	URL      string `json:"url"`       // URL вкладки
+	Title    string `json:"title"`     // Заголовок вкладки
+	IsActive bool   `json:"is_active"` // Активная ли вкладка
 }
 
 func (b *Browser) ClickElement(selector string) error {
@@ -552,6 +761,13 @@ func (b *Browser) ClickElement(selector string) error {
 
 	return chromedp.Run(ctx,
 		chromedp.WaitVisible(selector, chromedp.ByQuery),
+		// Удаляем target="_blank" чтобы не открывать новые вкладки
+		chromedp.Evaluate(fmt.Sprintf(`
+			const el = document.querySelector('%s');
+			if (el && el.tagName === 'A') {
+				el.removeAttribute('target');
+			}
+		`, selector), nil),
 		chromedp.Click(selector, chromedp.ByQuery),
 		chromedp.Sleep(1*time.Second),
 	)
@@ -599,6 +815,13 @@ func (b *Browser) ClickByText(text string) error {
 					role === 'button' || role === 'link' ||
 					clickable !== null || hasPointer ||
 					el.classList.contains('button') || el.classList.contains('btn')) {
+					return true;
+				}
+				
+				// Элементы писем (mail.ru, gmail и т.д.)
+				const hasDataId = el.hasAttribute('data-id') || el.hasAttribute('data-item-id') || el.hasAttribute('data-key');
+				const inMailContainer = el.closest('[class*="mail"], [class*="message"], [class*="inbox"], [class*="letter"], [class*="dataset"]');
+				if (hasDataId && inMailContainer) {
 					return true;
 				}
 				
@@ -723,6 +946,21 @@ func (b *Browser) ClickByText(text string) error {
 				});
 			}
 			
+			// Поиск элементов писем (специальная логика для почтовых сервисов)
+			if (!target) {
+				const emailContainers = document.querySelectorAll('[class*="mail"], [class*="message"], [class*="inbox"], [class*="letter"], [class*="dataset"]');
+				for (const container of emailContainers) {
+					const emailItems = Array.from(container.querySelectorAll('a, div[role="link"], div[data-id], li[data-id], tr[data-id]'));
+					target = emailItems.find(el => {
+						if (!isVisible(el)) return false;
+						const text = getElementText(el);
+						// Проверяем по полному совпадению или по вхождению
+						return text.toLowerCase().includes(searchLower) || searchLower.includes(text.toLowerCase());
+					});
+					if (target) break;
+				}
+			}
+			
 			// Поиск кнопок добавления в корзину по специальным признакам
 			if (!target && (searchLower.includes('добавить') || searchLower.includes('корзин') || searchLower === '+' || searchLower.includes('add') || searchLower.includes('cart'))) {
 				target = allElements.find(el => {
@@ -828,6 +1066,11 @@ func (b *Browser) ClickByText(text string) error {
 			}
 			
 			if (target) {
+				// Предотвращаем открытие новых вкладок - убираем target="_blank"
+				if (target.tagName === 'A') {
+					target.removeAttribute('target');
+				}
+				
 				try {
 					target.click();
 				} catch (e) {
@@ -878,6 +1121,176 @@ func (b *Browser) FillInput(selector, value string) error {
 		chromedp.Clear(selector, chromedp.ByQuery),
 		chromedp.SendKeys(selector, value, chromedp.ByQuery),
 		chromedp.Sleep(500*time.Millisecond),
+	)
+}
+
+// PressKey нажимает клавишу на клавиатуре (например: Delete, Enter, Escape)
+func (b *Browser) PressKey(keyName string) error {
+	// Проверяем, не отменен ли контекст браузера
+	select {
+	case <-b.ctx.Done():
+		return fmt.Errorf("browser context was canceled - браузер недоступен")
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, 10*time.Second)
+	defer cancel()
+
+	// Карта соответствия названий клавиш к кодам
+	type keyInfo struct {
+		key  string
+		code string
+	}
+	
+	var keyData keyInfo
+	switch strings.ToLower(keyName) {
+	case "delete", "del":
+		keyData = keyInfo{key: "Delete", code: "Delete"}
+	case "enter", "return":
+		keyData = keyInfo{key: "Enter", code: "Enter"}
+	case "escape", "esc":
+		keyData = keyInfo{key: "Escape", code: "Escape"}
+	case "backspace":
+		keyData = keyInfo{key: "Backspace", code: "Backspace"}
+	case "tab":
+		keyData = keyInfo{key: "Tab", code: "Tab"}
+	case "space":
+		keyData = keyInfo{key: " ", code: "Space"}
+	case "arrowup", "up":
+		keyData = keyInfo{key: "ArrowUp", code: "ArrowUp"}
+	case "arrowdown", "down":
+		keyData = keyInfo{key: "ArrowDown", code: "ArrowDown"}
+	case "arrowleft", "left":
+		keyData = keyInfo{key: "ArrowLeft", code: "ArrowLeft"}
+	case "arrowright", "right":
+		keyData = keyInfo{key: "ArrowRight", code: "ArrowRight"}
+	case "pageup":
+		keyData = keyInfo{key: "PageUp", code: "PageUp"}
+	case "pagedown":
+		keyData = keyInfo{key: "PageDown", code: "PageDown"}
+	case "home":
+		keyData = keyInfo{key: "Home", code: "Home"}
+	case "end":
+		keyData = keyInfo{key: "End", code: "End"}
+	default:
+		return fmt.Errorf("неизвестная клавиша: %s", keyName)
+	}
+
+	// Отправляем событие нажатия клавиши
+	return chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Key down
+			if err := input.DispatchKeyEvent(input.KeyDown).
+				WithKey(keyData.key).
+				WithCode(keyData.code).
+				Do(ctx); err != nil {
+				return err
+			}
+			time.Sleep(50 * time.Millisecond)
+			// Key up
+			if err := input.DispatchKeyEvent(input.KeyUp).
+				WithKey(keyData.key).
+				WithCode(keyData.code).
+				Do(ctx); err != nil {
+				return err
+			}
+			return nil
+		}),
+		chromedp.Sleep(500*time.Millisecond), // Даем время на обработку
+	)
+}
+
+// GetAllTabs возвращает список всех открытых вкладок
+func (b *Browser) GetAllTabs() ([]TabInfo, error) {
+	// Проверяем, не отменен ли контекст браузера
+	select {
+	case <-b.ctx.Done():
+		return nil, fmt.Errorf("browser context was canceled - браузер недоступен")
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+	defer cancel()
+
+	var tabs []TabInfo
+	var currentTargetID target.ID
+
+	// Получаем ID текущего таргета
+	err := chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			currentTargetID = chromedp.FromContext(ctx).Target.TargetID
+			return nil
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current target: %w", err)
+	}
+
+	// Получаем список всех таргетов
+	err = chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			targets, err := target.GetTargets().Do(ctx)
+			if err != nil {
+				return err
+			}
+
+			for _, t := range targets {
+				// Фильтруем только страницы (вкладки)
+				if t.Type == "page" {
+					tabs = append(tabs, TabInfo{
+						ID:       string(t.TargetID),
+						URL:      t.URL,
+						Title:    t.Title,
+						IsActive: t.TargetID == currentTargetID,
+					})
+				}
+			}
+			return nil
+		}),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tabs: %w", err)
+	}
+
+	return tabs, nil
+}
+
+// SwitchToTab переключается на вкладку по её ID
+func (b *Browser) SwitchToTab(tabID string) error {
+	// Проверяем, не отменен ли контекст браузера
+	select {
+	case <-b.ctx.Done():
+		return fmt.Errorf("browser context was canceled - браузер недоступен")
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+	defer cancel()
+
+	return chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return target.ActivateTarget(target.ID(tabID)).Do(ctx)
+		}),
+	)
+}
+
+// CloseTab закрывает вкладку по её ID
+func (b *Browser) CloseTab(tabID string) error {
+	// Проверяем, не отменен ли контекст браузера
+	select {
+	case <-b.ctx.Done():
+		return fmt.Errorf("browser context was canceled - браузер недоступен")
+	default:
+	}
+
+	ctx, cancel := context.WithTimeout(b.ctx, 5*time.Second)
+	defer cancel()
+
+	return chromedp.Run(ctx,
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return target.CloseTarget(target.ID(tabID)).Do(ctx)
+		}),
 	)
 }
 
@@ -1558,15 +1971,16 @@ func (b *Browser) Close() error {
 }
 
 type PageContent struct {
-	URL      string      `json:"url"`
-	Title    string      `json:"title"`
-	Text     string      `json:"text"`
-	Links    []Link      `json:"links"`
-	Buttons  []Button    `json:"buttons"`
-	Inputs   []Input     `json:"inputs"`
-	Headings []Heading   `json:"headings"`
-	Lists    [][]string  `json:"lists,omitempty"`   // списки -> элементы
-	Tables   [][][]string `json:"tables,omitempty"` // таблицы -> строки -> ячейки
+	URL      string       `json:"url"`
+	Title    string       `json:"title"`
+	Text     string       `json:"text"`
+	Links    []Link       `json:"links"`
+	Buttons  []Button     `json:"buttons"`
+	Inputs   []Input      `json:"inputs"`
+	Headings []Heading    `json:"headings"`
+	Lists    [][]string   `json:"lists,omitempty"`   // списки -> элементы
+	Tables   [][][]string `json:"tables,omitempty"`  // таблицы -> строки -> ячейки
+	Tabs     []TabInfo    `json:"tabs,omitempty"`    // открытые вкладки браузера
 }
 
 type Link struct {
@@ -1575,9 +1989,16 @@ type Link struct {
 }
 
 type Button struct {
-	Text string `json:"text"`
-	Type string `json:"type"`
-	Role string `json:"role,omitempty"`
+	Text       string `json:"text"`
+	Type       string `json:"type"`
+	Role       string `json:"role,omitempty"`
+	AriaLabel  string `json:"aria_label,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Class      string `json:"class,omitempty"`
+	ID         string `json:"id,omitempty"`
+	DataAction string `json:"data_action,omitempty"` // data-action, data-testid, data-qa
+	Context    string `json:"context,omitempty"`     // где находится кнопка (header, footer, nav, etc)
+	OnClick    string `json:"onclick,omitempty"`     // onclick атрибут или краткое описание
 }
 
 type Input struct {
