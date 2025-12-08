@@ -1,0 +1,50 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+dist/
+
+# Go workspace file
+go.work
+
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
+*.key
+*.pem
+*secret*
+*password*
+*credentials*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Browser data (may contain session cookies and auth tokens)
+browser_data/
+user_data/
+*.session
+*cookies*
+
+# Temporary files
+tmp/
+temp/
+
